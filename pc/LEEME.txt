@@ -31,6 +31,20 @@ USO
 4. "Crear CIA". Por defecto se guarda en <SD>\cias\.
 5. En la 3DS: FBI > SD > cias > instala el CIA.
 
+VARIOS JUEGOS A LA VEZ
+- "Varios juegos..." abre una lista con todos los juegos de una carpeta de
+  la SD (y sus subcarpetas, si marcas la casilla).
+- Si hay un .m3u, aparece solo el .m3u y no sus discos. Si un juego tiene
+  "(Disc 1)", "(Disc 2)"... sin .m3u, se crea el .m3u al hacer los CIAs.
+- Los .bin de un .cue no aparecen, y si un juego esta en dos formatos
+  (por ejemplo .chd y .cue) solo se marca el mejor.
+- Los juegos que ya tienen forwarder aparecen sin marcar.
+- Cada juego toma sus imagenes de logos\, covers\ e icons\, y lo que falte
+  del primer resultado de SteamGridDB; el fondo, si no hay, de libretro.
+  Usa el banner transparente y el sonido elegidos en la ventana principal.
+- Doble clic en un juego lo abre en la ventana principal para ajustarlo.
+- Los CIAs quedan en <SD>\cias\.
+
 TITLE ID
 - El programa revisa los titulos instalados en la SD y el registro
   sdmc:/forwarders/registry.txt (el mismo que usa fwdgen.3dsx).

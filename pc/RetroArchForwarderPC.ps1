@@ -393,11 +393,11 @@ function Get-System([string]$corePath) {
 }
 
 # Downloads Named_Titles / Named_Boxarts from libretro (plain HTTP, like the console app).
-function Get-LibretroArt([string]$kind) {
+function Get-LibretroArt([string]$kind, [string]$gameName = $script:GameName, [string]$romPath = $script:Rom) {
     $system = Get-System $cmbCore.Text
-    if (-not $system -or -not $script:GameName) { return $null }
-    $names = @($script:GameName)
-    if ([IO.Path]::GetExtension($script:Rom) -ieq '.m3u') { $names += "$($script:GameName) (Disc 1)" }
+    if (-not $system -or -not $gameName) { return $null }
+    $names = @($gameName)
+    if ([IO.Path]::GetExtension($romPath) -ieq '.m3u') { $names += "$gameName (Disc 1)" }
     foreach ($n in $names) {
         $file = ($n -replace '[&*/:`"<>?\\|]', '_') + '.png'
         $dest = Join-Path $script:CacheDir ("libretro_{0}_{1}" -f $kind, $file)
@@ -489,8 +489,11 @@ $btnSdRefresh = New-Button 'Actualizar' 140 221 75 25
 $lblSd = New-Label '' 220 222 178
 $lblSd.AutoEllipsis = $true
 
-$btnRom = New-Button 'Elegir juego de la SD...' 12 254 200
-$lblRom = New-Label 'Ningun juego seleccionado' 218 256 180
+$btnRom = New-Button 'Elegir juego...' 12 254 120
+$btnBatch = New-Button 'Varios juegos...' 136 254 120
+$tipBatch = New-Object System.Windows.Forms.ToolTip
+$tipBatch.SetToolTip($btnBatch, 'Crea los CIAs de todos los juegos de una carpeta de la SD, detectando los .m3u.')
+$lblRom = New-Label 'Ningun juego seleccionado' 262 256 136
 $lblRom.AutoEllipsis = $true
 
 [void](New-Label 'Core:' 12 288 90)
@@ -646,12 +649,11 @@ function Update-Tid {
     }
 }
 
-# Builds the banner and the icon exactly as they will be written.
-function New-Art([string]$outBanner, [string]$outIcon) {
+function New-ArtFor([string]$bgPath, [string]$logoPath, [string]$iconPath, [bool]$transparent, [string]$outBanner, [string]$outIcon) {
     Remove-Item -LiteralPath $outBanner, $outIcon -ErrorAction SilentlyContinue
-    $bg = Load-Image $script:Bg; $logo = Load-Image $script:Logo; $icon = Load-Image $script:IconImg
+    $bg = Load-Image $bgPath; $logo = Load-Image $logoPath; $icon = Load-Image $iconPath
     try {
-        if ($logo -and $chkTrans.Checked) {
+        if ($logo -and $transparent) {
             $b = [FwdArt]::LogoOnly($logo, 256, 128, 248, 120)
             [FwdArt]::SaveAlpha($b, $outBanner); $b.Dispose()
         } elseif ($bg -or $logo) {
@@ -668,6 +670,11 @@ function New-Art([string]$outBanner, [string]$outIcon) {
     } finally {
         foreach ($x in @($bg, $logo, $icon)) { if ($x) { $x.Dispose() } }
     }
+}
+
+# Builds the banner and the icon exactly as they will be written.
+function New-Art([string]$outBanner, [string]$outIcon) {
+    New-ArtFor $script:Bg $script:Logo $script:IconImg $chkTrans.Checked $outBanner $outIcon
 }
 
 function Use-Transparent { return [bool]($chkTrans.Checked -and $script:Logo) }
@@ -829,24 +836,21 @@ $btnBgClear.Add_Click({ $script:Bg = $null; $script:BgIsLocal = $false; Update-P
 $btnIconClear.Add_Click({ $script:IconImg = $null; $script:IconIsLocal = $false; Update-Preview })
 
 $romFilter = 'Juegos (*.chd;*.m3u;*.cue;*.pbp;*.iso;*.ccd;*.toc;*.bin;*.sfc;*.smc;*.nes;*.gba;*.gb;*.gbc;*.md;*.gen;*.zip;*.7z)|*.chd;*.m3u;*.cue;*.pbp;*.iso;*.ccd;*.toc;*.bin;*.sfc;*.smc;*.nes;*.gba;*.gb;*.gbc;*.md;*.gen;*.zip;*.7z|Todos los archivos|*.*'
-$btnRom.Add_Click({
+# Loads a game of the SD card into the main window.
+function Load-Game([string]$file) {
     $sd = Get-SdRoot
     if (-not $sd) { Show-Error 'Primero conecta la SD de tu 3DS y dale a Actualizar.'; return }
-    $d = New-Object System.Windows.Forms.OpenFileDialog
-    $d.Filter = $romFilter
-    $d.InitialDirectory = "$sd\"
-    if ($d.ShowDialog() -ne 'OK') { return }
-    if (-not $d.FileName.StartsWith("$sd\", [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $file.StartsWith("$sd\", [StringComparison]::OrdinalIgnoreCase)) {
         Show-Error "El juego tiene que estar en la SD ($sd), porque el forwarder lo abre desde ahi."
         return
     }
-    $rel = $d.FileName.Substring($sd.Length).Replace('\', '/')
-    $script:SdRom = 'sdmc:' + $rel
-    if ([Text.Encoding]::UTF8.GetByteCount($script:SdRom) -gt 255) { Show-Error 'La ruta del juego es demasiado larga (maximo 255 caracteres).'; return }
-    $script:Rom = $d.FileName
-    $script:GameName = [IO.Path]::GetFileNameWithoutExtension($d.FileName)
+    $sdRom = 'sdmc:' + $file.Substring($sd.Length).Replace('\', '/')
+    if ([Text.Encoding]::UTF8.GetByteCount($sdRom) -gt 255) { Show-Error 'La ruta del juego es demasiado larga (maximo 255 caracteres).'; return }
+    $script:SdRom = $sdRom
+    $script:Rom = $file
+    $script:GameName = [IO.Path]::GetFileNameWithoutExtension($file)
     $clean = Get-CleanName $script:GameName
-    $lblRom.Text = [IO.Path]::GetFileName($d.FileName)
+    $lblRom.Text = [IO.Path]::GetFileName($file)
     $txtName.Text = $clean
 
     # local art first (logos\, covers\, icons\), then libretro, then SteamGridDB
@@ -871,9 +875,45 @@ $btnRom.Add_Click({
         Search-Games $clean
         $script:AutoPickNext = $false
     }
+}
+
+$btnRom.Add_Click({
+    $sd = Get-SdRoot
+    if (-not $sd) { Show-Error 'Primero conecta la SD de tu 3DS y dale a Actualizar.'; return }
+    $d = New-Object System.Windows.Forms.OpenFileDialog
+    $d.Filter = $romFilter
+    $d.InitialDirectory = "$sd\"
+    if ($d.ShowDialog() -ne 'OK') { return }
+    Load-Game $d.FileName
 })
 
 # ---------------------------------------------------------------- build
+# Builds one CIA: picks the title id, renders the art, runs fwdgen-pc.
+# Returns @{ Tid; Version; Status } or throws.
+function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out) {
+    $sd = Get-SdRoot
+    $t = Invoke-Cli ("tid --sd {0} --rom {1}" -f (Q $sd), (Q $sdRom))
+    if ($t.ERROR -or -not $t.TID) { throw "Title ID: $(if ($t.ERROR) { $t.ERROR } else { 'sin respuesta' })" }
+
+    $b = Join-Path $env:TEMP 'rafpc_build_banner.png'
+    $i = Join-Path $env:TEMP 'rafpc_build_icon.png'
+    New-ArtFor $bg $logo $icon $transparent $b $i
+
+    $name = ($name -replace '"', '').Trim()
+    $cliArgs = "build --sd {0} --template {1} --rom {2} --core {3} --name {4} --publisher {5} --tid {6} --out {7}" -f `
+        (Q $sd), (Q $script:Template), (Q $sdRom), (Q ([string]$cmbCore.SelectedItem)), (Q $name), (Q (($txtPub.Text -replace '"', '').Trim())), $t.TID, (Q $out)
+    if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
+    if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
+    if ((Test-Path -LiteralPath $b) -and $transparent -and $logo) { $cliArgs += ' --transparent' }
+    if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { $cliArgs += " --sound $(Q $script:Cfg.Sound)" }
+    $r = Invoke-Cli $cliArgs
+    if ($r.ExitCode -ne 0 -or -not $r.OK) {
+        $why = $(if ($r.ERROR) { $r.ERROR } elseif ($r.STDERR) { $r.STDERR } else { "codigo $($r.ExitCode)" })
+        throw "fwdgen-pc: $why"
+    }
+    return @{ Tid = $t.TID; Version = $r.VERSION; Status = $t.STATUS }
+}
+
 $btnBuild.Add_Click({
     $sd = Get-SdRoot
     if (-not $script:SdRom) { [void][System.Windows.Forms.MessageBox]::Show('Primero elige un juego de la SD.'); return }
@@ -897,25 +937,10 @@ $btnBuild.Add_Click({
         Update-Tid
         if (-not $script:Tid) { throw 'No se pudo elegir un Title ID.' }
 
-        Set-Status 'Creando banner e icono...' 2
-        $b = Join-Path $env:TEMP 'rafpc_build_banner.png'
-        $i = Join-Path $env:TEMP 'rafpc_build_icon.png'
-        New-Art $b $i
-
-        Set-Status 'Armando el CIA...' 3
-        $cliArgs = "build --sd {0} --template {1} --rom {2} --core {3} --name {4} --publisher {5} --tid {6} --out {7}" -f `
-            (Q $sd), (Q $script:Template), (Q $script:SdRom), (Q ([string]$cmbCore.SelectedItem)), (Q $name), (Q (($txtPub.Text -replace '"', '').Trim())), $script:Tid, (Q $d.FileName)
-        if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
-        if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
-        if ((Test-Path -LiteralPath $b) -and (Use-Transparent)) { $cliArgs += ' --transparent' }
-        if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { $cliArgs += " --sound $(Q $script:Cfg.Sound)" }
-        $r = Invoke-Cli $cliArgs
-        if ($r.ExitCode -ne 0 -or -not $r.OK) {
-            $why = $(if ($r.ERROR) { $r.ERROR } elseif ($r.STDERR) { $r.STDERR } else { "codigo $($r.ExitCode)" })
-            throw "fwdgen-pc: $why"
-        }
+        Set-Status 'Creando banner, icono y CIA...' 2
+        $r = Invoke-Build $script:SdRom $name $script:Bg $script:Logo $script:IconImg ([bool]$chkTrans.Checked) $d.FileName
         Update-Tid
-        Set-Status ("CIA creado: {0}  (Title ID {1}, version {2})" -f [IO.Path]::GetFileName($d.FileName), $script:Tid, $r.VERSION) 4
+        Set-Status ("CIA creado: {0}  (Title ID {1}, version {2})" -f [IO.Path]::GetFileName($d.FileName), $r.Tid, $r.Version) 4
         [void][System.Windows.Forms.MessageBox]::Show("CIA creado:`n$($d.FileName)`n`nInstalalo en la 3DS con FBI (SD > cias).", 'Listo')
     } catch {
         Write-Log "ERROR: $($_.Exception.Message)"
@@ -926,6 +951,309 @@ $btnBuild.Add_Click({
         $form.Cursor = [System.Windows.Forms.Cursors]::Default
     }
 })
+
+
+# ---------------------------------------------------------------- batch
+$script:DiscExt = @('.chd', '.cue', '.pbp', '.iso', '.ccd', '.toc', '.cbn', '.img', '.mdf')
+$script:RomExt  = $script:DiscExt + @('.m3u', '.bin', '.sfc', '.smc', '.nes', '.fds', '.gba', '.gb', '.gbc', '.md', '.gen', '.smd',
+                                      '.32x', '.sms', '.gg', '.pce', '.ngp', '.ws', '.wsc', '.col', '.a26', '.lnx', '.zip', '.7z')
+# When one game is there in several formats, the first wins.
+$script:ExtRank = @('.m3u', '.chd', '.pbp', '.cue', '.iso', '.ccd', '.toc', '.cbn', '.img', '.mdf')
+
+function Get-NormTitle([string]$s) { ($s.ToLowerInvariant() -replace '[^a-z0-9]', '') }
+
+function Get-FullPathSafe([string]$dir, [string]$rel) {
+    try { return [IO.Path]::GetFullPath((Join-Path $dir $rel)) } catch { return $null }
+}
+
+# Lists the games of a folder. A .m3u hides the discs it lists, a .cue the
+# tracks it lists. Discs named "(Disc 1)", "(Disc 2)"... without a .m3u are
+# grouped into a planned one, written only when the CIAs are built.
+function Find-Games([string]$dir, [bool]$recurse) {
+    $files = @(Get-ChildItem -LiteralPath $dir -File -Recurse:$recurse -ErrorAction SilentlyContinue |
+               Where-Object { $script:RomExt -contains $_.Extension.ToLower() })
+    $covered = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($f in $files) {
+        $ext = $f.Extension.ToLower()
+        if ($ext -ne '.m3u' -and $ext -ne '.cue') { continue }
+        try { $lines = [IO.File]::ReadAllLines($f.FullName) } catch { continue }
+        foreach ($line in $lines) {
+            $ref = $null
+            if ($ext -eq '.m3u') {
+                $l = $line.Trim()
+                if ($l -and -not $l.StartsWith('#')) { $ref = $l }
+            } elseif ($line -match '^\s*FILE\s+"([^"]+)"' -or $line -match '^\s*FILE\s+(\S+)') {
+                $ref = $Matches[1]
+            }
+            if ($ref) { $full = Get-FullPathSafe $f.DirectoryName $ref; if ($full) { [void]$covered.Add($full) } }
+        }
+    }
+
+    $games = New-Object System.Collections.ArrayList
+    $rx = '^(?<pre>.*?)\s*\((?:Disc|Disco|CD)\s*(?<n>\d+)(?:\s*of\s*\d+)?\)(?<post>.*)$'
+    $groups = @{}
+    foreach ($f in $files) {
+        if ($script:DiscExt -notcontains $f.Extension.ToLower() -or $covered.Contains($f.FullName)) { continue }
+        $m = [regex]::Match([IO.Path]::GetFileNameWithoutExtension($f.Name), $rx, 'IgnoreCase')
+        if (-not $m.Success) { continue }
+        $base = (($m.Groups['pre'].Value + $m.Groups['post'].Value) -replace '\s+', ' ').Trim()
+        $key = (Join-Path $f.DirectoryName $base) + '|' + $f.Extension.ToLower()
+        if (-not $groups.ContainsKey($key)) { $groups[$key] = New-Object System.Collections.ArrayList }
+        [void]$groups[$key].Add([pscustomobject]@{ N = [int]$m.Groups['n'].Value; File = $f; Base = $base })
+    }
+    foreach ($key in $groups.Keys) {
+        $discs = @($groups[$key] | Sort-Object N)
+        if ($discs.Count -lt 2) { continue }
+        $m3u = Join-Path $discs[0].File.DirectoryName ($discs[0].Base + '.m3u')
+        if (Test-Path -LiteralPath $m3u) { continue }
+        foreach ($d in $discs) { [void]$covered.Add($d.File.FullName) }
+        [void]$games.Add([pscustomobject]@{ File = $m3u; Discs = @($discs | ForEach-Object { $_.File.Name }); Note = "se creara .m3u ($($discs.Count) discos)" })
+    }
+
+    foreach ($f in $files) {
+        if ($covered.Contains($f.FullName)) { continue }
+        $note = ''
+        if ($f.Extension -ieq '.m3u') {
+            $n = 0
+            try { $n = @([IO.File]::ReadAllLines($f.FullName) | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') }).Count } catch {}
+            $note = ".m3u ($n discos)"
+        }
+        [void]$games.Add([pscustomobject]@{ File = $f.FullName; Discs = $null; Note = $note })
+    }
+
+    # Same game in several formats (Game.chd and Game.cue): keep the best.
+    $best = @{}
+    foreach ($g in $games) {
+        $k = (Join-Path ([IO.Path]::GetDirectoryName($g.File)) ([IO.Path]::GetFileNameWithoutExtension($g.File))).ToLower()
+        $r = [Array]::IndexOf($script:ExtRank, [IO.Path]::GetExtension($g.File).ToLower()); if ($r -lt 0) { $r = 99 }
+        $g | Add-Member -NotePropertyName Rank -NotePropertyValue $r
+        $g | Add-Member -NotePropertyName Dup -NotePropertyValue $false
+        if (-not $best.ContainsKey($k) -or $best[$k].Rank -gt $r) { $best[$k] = $g }
+    }
+    foreach ($g in $games) {
+        $k = (Join-Path ([IO.Path]::GetDirectoryName($g.File)) ([IO.Path]::GetFileNameWithoutExtension($g.File))).ToLower()
+        if ($best[$k] -ne $g) { $g.Dup = $true; $g.Note = "otro formato de $([IO.Path]::GetFileName($best[$k].File))" }
+    }
+    return @($games | Sort-Object File)
+}
+
+# The SteamGridDB game closest to the name, and its first logo, hero and icon.
+function Get-SgdbAuto([string]$clean) {
+    $res = @(Invoke-Sgdb ('/search/autocomplete/' + [Uri]::EscapeDataString($clean)))
+    if (-not $res.Count -and $clean -match '^(.+?) - ') { $res = @(Invoke-Sgdb ('/search/autocomplete/' + [Uri]::EscapeDataString($Matches[1]))) }
+    if (-not $res.Count) { return $null }
+    $g = $res | Where-Object { (Get-NormTitle $_.name) -eq (Get-NormTitle $clean) } | Select-Object -First 1
+    if (-not $g) { $g = $res[0] }
+    $o = @{ Name = [string]$g.name; Logo = $null; Bg = $null; Icon = $null }
+    $l = @(Invoke-Sgdb "/logos/game/$($g.id)?mimes=image/png&nsfw=false&humor=false")
+    if ($l.Count) { $o.Logo = Save-Remote ([string]$l[0].url) 'logo' $l[0].id }
+    $h = @(Invoke-Sgdb "/heroes/game/$($g.id)?mimes=image/png,image/jpeg&nsfw=false&humor=false")
+    if ($h.Count) { $o.Bg = Save-Remote ([string]$h[0].url) 'hero' $h[0].id }
+    $c = @(Invoke-Sgdb "/icons/game/$($g.id)?mimes=image/png&nsfw=false&humor=false")
+    if ($c.Count) { $o.Icon = Save-Remote ([string]$c[0].url) 'icon' $c[0].id }
+    return $o
+}
+
+function Get-RegisteredRoms([string]$sd) {
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    $reg = Join-Path "$sd\" 'forwarders\registry.txt'
+    if (Test-Path -LiteralPath $reg) {
+        foreach ($line in [IO.File]::ReadAllLines($reg, [Text.Encoding]::UTF8)) {
+            $i = $line.IndexOf('|')
+            if ($i -eq 16) { [void]$set.Add($line.Substring(17).TrimEnd()) }
+        }
+    }
+    return $set
+}
+
+function Show-Batch {
+    $sd = Get-SdRoot
+    if (-not $sd) { Show-Error 'Primero conecta la SD de tu 3DS y dale a Actualizar.'; return }
+    if (-not $cmbCore.SelectedItem) { Show-Error "No hay ningun core .3dsx en la SD.`nCopia pcsx_rearmed_libretro.3dsx (de RetroArch_3dsx.7z) a $sd\retroarch\cores\"; return }
+
+    $bf = New-Object System.Windows.Forms.Form
+    $bf.Text = 'Crear CIAs de varios juegos'
+    $bf.ClientSize = New-Object System.Drawing.Size(760, 570)
+    $bf.StartPosition = 'CenterParent'
+    $bf.FormBorderStyle = 'FixedSingle'
+    $bf.MaximizeBox = $false
+    $bf.Font = $form.Font
+    function BAdd($ctl, [int]$x, [int]$y, [int]$w, [int]$h) {
+        $ctl.Location = New-Object System.Drawing.Point($x, $y)
+        $ctl.Size = New-Object System.Drawing.Size($w, $h)
+        $bf.Controls.Add($ctl)
+        return $ctl
+    }
+
+    $l = New-Object System.Windows.Forms.Label; $l.Text = 'Carpeta:'; $l.TextAlign = 'MiddleLeft'
+    [void](BAdd $l 12 12 60 23)
+    $txtDir = BAdd (New-Object System.Windows.Forms.TextBox) 75 12 470 23
+    $txtDir.ReadOnly = $true
+    $btnDir = BAdd (New-Object System.Windows.Forms.Button) 550 10 80 26; $btnDir.Text = 'Elegir...'
+    $chkRec = BAdd (New-Object System.Windows.Forms.CheckBox) 636 12 120 23; $chkRec.Text = 'Subcarpetas'
+
+    $chkM3u = BAdd (New-Object System.Windows.Forms.CheckBox) 12 42 360 22
+    $chkM3u.Text = 'Crear el .m3u de los juegos de varios discos que no lo tengan'; $chkM3u.Checked = $true
+    $chkSkip = BAdd (New-Object System.Windows.Forms.CheckBox) 380 42 370 22
+    $chkSkip.Text = 'No marcar los juegos que ya tienen forwarder'; $chkSkip.Checked = $true
+    $chkSg = BAdd (New-Object System.Windows.Forms.CheckBox) 12 64 360 22
+    $chkSg.Text = 'SteamGridDB: usar el primer logo, fondo e icono'
+    $chkSg.Checked = [bool]$txtKey.Text.Trim(); $chkSg.Enabled = [bool]$txtKey.Text.Trim()
+    $lblOpts = BAdd (New-Object System.Windows.Forms.Label) 380 64 370 22
+    $lblOpts.TextAlign = 'MiddleLeft'; $lblOpts.ForeColor = [System.Drawing.Color]::DimGray
+    $snd = $(if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { [IO.Path]::GetFileName($script:Cfg.Sound) } else { 'el de la plantilla' })
+    $lblOpts.Text = "Banner transparente: $(if ($chkTrans.Checked) { 'si' } else { 'no' })   Sonido: $snd"
+
+    $lv = BAdd (New-Object System.Windows.Forms.ListView) 12 92 736 370
+    $lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $true
+    [void]$lv.Columns.Add('Juego', 260)
+    [void]$lv.Columns.Add('Archivo', 270)
+    [void]$lv.Columns.Add('Estado', 180)
+    $hint = BAdd (New-Object System.Windows.Forms.Label) 12 465 736 20
+    $hint.Text = 'Doble clic en un juego: cierra esta ventana y lo abre en la ventana principal para ajustarlo a mano.'
+    $hint.ForeColor = [System.Drawing.Color]::DimGray
+    $bp = BAdd (New-Object System.Windows.Forms.ProgressBar) 12 488 736 18
+    $bs = BAdd (New-Object System.Windows.Forms.Label) 12 508 736 20; $bs.Text = 'Elige una carpeta de la SD.'
+    $btnAll  = BAdd (New-Object System.Windows.Forms.Button) 12 532 80 28;  $btnAll.Text = 'Marcar todos'
+    $btnNone = BAdd (New-Object System.Windows.Forms.Button) 96 532 80 28;  $btnNone.Text = 'Ninguno'
+    $btnGo   = BAdd (New-Object System.Windows.Forms.Button) 520 528 124 34; $btnGo.Text = 'Crear CIAs'
+    $btnGo.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
+    $btnX    = BAdd (New-Object System.Windows.Forms.Button) 650 528 98 34;  $btnX.Text = 'Cerrar'
+
+    $state = @{ Running = $false; Stop = $false; Load = $null }
+
+    $scan = {
+        $lv.Items.Clear()
+        if (-not $txtDir.Text) { return }
+        $bf.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        try {
+            $reg = Get-RegisteredRoms $sd
+            $found = Find-Games $txtDir.Text $chkRec.Checked
+            foreach ($g in $found) {
+                if ($g.Discs -and -not $chkM3u.Checked) { continue }
+                $sdRom = 'sdmc:' + $g.File.Substring($sd.Length).Replace('\', '/')
+                $it = New-Object System.Windows.Forms.ListViewItem((Get-CleanName ([IO.Path]::GetFileNameWithoutExtension($g.File))))
+                [void]$it.SubItems.Add($g.File.Substring($txtDir.Text.TrimEnd('\').Length).TrimStart('\'))
+                $note = $g.Note
+                $has = $reg.Contains($sdRom)
+                if ($has) { $note = $(if ($note) { "$note, " } else { '' }) + 'ya tiene forwarder' }
+                [void]$it.SubItems.Add($note)
+                $it.Tag = $g
+                $it.Checked = -not $g.Dup -and -not ($has -and $chkSkip.Checked)
+                if ($g.Dup) { $it.ForeColor = [System.Drawing.Color]::Gray }
+                [void]$lv.Items.Add($it)
+            }
+            $bs.Text = "$($lv.Items.Count) juegos encontrados, $(@($lv.CheckedItems).Count) marcados."
+        } finally { $bf.Cursor = [System.Windows.Forms.Cursors]::Default }
+    }
+
+    $btnDir.Add_Click({
+        $d = New-Object System.Windows.Forms.FolderBrowserDialog
+        $d.Description = 'Carpeta de juegos en la SD'
+        $d.SelectedPath = $(if ($txtDir.Text) { $txtDir.Text } else { "$sd\" })
+        if ($d.ShowDialog() -ne 'OK') { return }
+        if (-not ($d.SelectedPath + '\').StartsWith("$sd\", [StringComparison]::OrdinalIgnoreCase)) {
+            Show-Error "La carpeta tiene que estar en la SD ($sd)."
+            return
+        }
+        $txtDir.Text = $d.SelectedPath
+        & $scan
+    })
+    $chkRec.Add_CheckedChanged({ & $scan })
+    $chkM3u.Add_CheckedChanged({ & $scan })
+    $chkSkip.Add_CheckedChanged({ & $scan })
+    $btnAll.Add_Click({ foreach ($it in $lv.Items) { $it.Checked = $true } })
+    $btnNone.Add_Click({ foreach ($it in $lv.Items) { $it.Checked = $false } })
+    $lv.Add_ItemChecked({ if (-not $state.Running) { $bs.Text = "$($lv.Items.Count) juegos encontrados, $(@($lv.CheckedItems).Count) marcados." } })
+    $lv.Add_DoubleClick({
+        if ($state.Running -or $lv.SelectedItems.Count -eq 0) { return }
+        $g = $lv.SelectedItems[0].Tag
+        if ($g.Discs) { Show-Error 'Ese juego todavia no tiene .m3u: crealo con "Crear CIAs" o abre un disco.'; return }
+        $state.Load = $g.File
+        $bf.Close()
+    })
+    $btnX.Add_Click({ if ($state.Running) { $state.Stop = $true; $btnX.Enabled = $false; $bs.Text = 'Deteniendo despues del juego actual...' } else { $bf.Close() } })
+    $bf.Add_FormClosing({ param($s, $e) if ($state.Running) { $state.Stop = $true; $e.Cancel = $true } })
+
+    $btnGo.Add_Click({
+        $items = @($lv.CheckedItems)
+        if (-not $items.Count) { Show-Error 'Marca al menos un juego.'; return }
+        $ciaDir = "$sd\cias"
+        if (-not (Test-Path -LiteralPath $ciaDir)) { [void](New-Item -ItemType Directory -Path $ciaDir) }
+        $state.Running = $true; $state.Stop = $false
+        foreach ($c in @($btnGo, $btnDir, $chkRec, $chkM3u, $chkSkip, $chkSg, $btnAll, $btnNone)) { $c.Enabled = $false }
+        $btnX.Text = 'Detener'
+        $bp.Maximum = $items.Count; $bp.Value = 0
+        $ok = 0; $bad = 0
+        foreach ($it in $items) {
+            if ($state.Stop) { break }
+            $g = $it.Tag
+            $lv.EnsureVisible($it.Index)
+            $it.SubItems[2].Text = 'Preparando...'; $it.ForeColor = [System.Drawing.SystemColors]::WindowText
+            [System.Windows.Forms.Application]::DoEvents()
+            try {
+                if ($g.Discs) {
+                    [IO.File]::WriteAllLines($g.File, [string[]]$g.Discs, (New-Object Text.UTF8Encoding($false)))
+                    Write-Log "m3u creado: $($g.File)"
+                }
+                $stem = [IO.Path]::GetFileNameWithoutExtension($g.File)
+                $clean = Get-CleanName $stem
+                $sdRom = 'sdmc:' + $g.File.Substring($sd.Length).Replace('\', '/')
+                if ([Text.Encoding]::UTF8.GetByteCount($sdRom) -gt 255) { throw 'ruta demasiado larga' }
+
+                $names = @($stem, $clean)
+                $logo = Find-Local 'logos' $names; $bg = Find-Local 'covers' $names; $icon = Find-Local 'icons' $names
+                $src = @()
+                if ($chkSg.Checked -and (-not $logo -or -not $bg -or -not $icon)) {
+                    $it.SubItems[2].Text = 'SteamGridDB...'; [System.Windows.Forms.Application]::DoEvents()
+                    try {
+                        $a = Get-SgdbAuto $clean
+                        if ($a) {
+                            if (-not $logo) { $logo = $a.Logo }; if (-not $bg) { $bg = $a.Bg }; if (-not $icon) { $icon = $a.Icon }
+                            $src += "SGDB: $($a.Name)"
+                        }
+                    } catch { $src += 'SGDB no respondio'; Write-Log "SGDB ${clean}: $($_.Exception.Message)" }
+                }
+                if (-not $bg) {
+                    $bg = Get-LibretroArt 'Named_Titles' $stem $g.File
+                    if ($bg) { $src += 'fondo libretro' }
+                }
+
+                $it.SubItems[2].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
+                $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
+                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out
+                $it.SubItems[2].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
+                $it.ForeColor = [System.Drawing.Color]::DarkGreen
+                $it.Checked = $false
+                if ($src) { $it.ToolTipText = $src -join ', ' }
+                $ok++
+            } catch {
+                $it.SubItems[2].Text = "Error: $($_.Exception.Message)"
+                $it.ForeColor = [System.Drawing.Color]::DarkRed
+                Write-Log "LOTE ERROR $($g.File): $($_.Exception.Message)"
+                $bad++
+            }
+            $bp.Value = [Math]::Min($bp.Maximum, $bp.Value + 1)
+            $bs.Text = "$ok creados, $bad con error, $($items.Count - $ok - $bad) pendientes."
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+        $state.Running = $false
+        foreach ($c in @($btnGo, $btnDir, $chkRec, $chkM3u, $chkSkip, $btnAll, $btnNone)) { $c.Enabled = $true }
+        $chkSg.Enabled = [bool]$txtKey.Text.Trim()
+        $btnX.Text = 'Cerrar'; $btnX.Enabled = $true
+        $bs.Text = "Terminado: $ok CIAs en $ciaDir" + $(if ($bad) { ", $bad con error (detalle en log.txt)" } else { '' }) + '. Instalalos con FBI.'
+        Update-Tid
+    })
+
+    $lv.ShowItemToolTips = $true
+    # Modal: the handlers above see this function's variables only while it runs.
+    [void]$bf.ShowDialog($form)
+    $bf.Dispose()
+    if ($state.Load) { Load-Game $state.Load }
+}
+
+$btnBatch.Add_Click({ Show-Batch })
 
 # ---------------------------------------------------------------- start
 Refresh-Sd

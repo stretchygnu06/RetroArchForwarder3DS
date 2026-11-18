@@ -108,6 +108,20 @@ Then, with the console's SD card in the PC:
 6. **Build the CIA**: it is saved by default to `<SD>\cias\`. Install it
    with FBI.
 
+**Several games at once**: *Varios juegos...* lists every game of a folder on
+the SD card (subfolders optional) and builds them all into `<SD>\cias\`.
+
+- A `.m3u` stands for the discs it lists, which are hidden; a `.cue` hides
+  its tracks. Discs named `(Disc 1)`, `(Disc 2)`... without a `.m3u` get one,
+  written when the CIAs are built.
+- A game found in several formats (`Game.chd` and `Game.cue`) is listed once
+  checked, in the best format (`.m3u`, `.chd`, `.pbp`, `.cue`, ...).
+- Games the registry already gives a forwarder start unchecked.
+- Each game takes its local images first, the first SteamGridDB logo, hero and
+  icon for what is missing, and the libretro title screen as a last resort
+  background. The transparent banner option and the sound apply to all.
+- Double-click a game to open it in the main window and adjust it by hand.
+
 Rebuilding a game keeps its title id and raises the title version, so the
 HOME menu refreshes the icon when the new CIA is installed over the old one.
 The API key is kept in `settings.json`, next to the script, in plain text;
