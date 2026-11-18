@@ -280,6 +280,24 @@ uint8_t* cia_icon_data(cia_t* cia)
 	return NULL;
 }
 
+// Room for the banner: up to the next section, or the end of the ExeFS.
+// The declared size shrinks to the banner actually written, so it cannot
+// serve as the room once a banner has been set.
+static size_t banner_room(const cia_t* cia, size_t banner_off)
+{
+	const char* name;
+	size_t off, size, end;
+	int index;
+	uint32_t unit = 0x200u << cia->data[cia->ncch + NCCH_FLAGS + 6];
+
+	end = cia->ncch + (size_t)rd32le(cia->data + cia->ncch + NCCH_EXEFS_OFF) * unit
+		+ (size_t)rd32le(cia->data + cia->ncch + NCCH_EXEFS_OFF + 4) * unit;
+	for (index = 0; index < 10; index++)
+		if (exefs_entry(cia, index, &name, &off, &size) && off > banner_off && off < end)
+			end = off;
+	return end - banner_off;
+}
+
 uint8_t* cia_banner_data(cia_t* cia, size_t* reserved)
 {
 	const char* name;
@@ -289,10 +307,22 @@ uint8_t* cia_banner_data(cia_t* cia, size_t* reserved)
 	for (index = 0; index < 10; index++)
 		if (exefs_entry(cia, index, &name, &off, &size) && name_is(name, "banner"))
 		{
-			if (reserved) *reserved = size;
+			if (reserved) *reserved = banner_room(cia, off);
 			return cia->data + off;
 		}
 	return NULL;
+}
+
+size_t cia_banner_size(cia_t* cia)
+{
+	const char* name;
+	size_t off, size;
+	int index;
+
+	for (index = 0; index < 10; index++)
+		if (exefs_entry(cia, index, &name, &off, &size) && name_is(name, "banner"))
+			return size;
+	return 0;
 }
 
 int cia_set_banner(cia_t* cia, const uint8_t* blob, size_t len)
@@ -305,10 +335,12 @@ int cia_set_banner(cia_t* cia, const uint8_t* blob, size_t len)
 	{
 		if (!exefs_entry(cia, index, &name, &off, &size)) continue;
 		if (!name_is(name, "banner")) continue;
-		if (len > size) return CIA_ERR_SIZE;
-
-		memcpy(cia->data + off, blob, len);
-		memset(cia->data + off + len, 0, size - len);
+		{
+			size_t room = banner_room(cia, off);
+			if (len > room) return CIA_ERR_SIZE;
+			memmove(cia->data + off, blob, len);
+			memset(cia->data + off + len, 0, room - len);
+		}
 		// Declare the new size: the reserved room downstream does not move.
 		{
 			uint8_t* field = cia->data + cia->exefs + index * 0x10 + 12;

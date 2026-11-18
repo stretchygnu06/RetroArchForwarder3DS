@@ -281,7 +281,7 @@ public static class FwdArt
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sound = $null }
 if (Test-Path -LiteralPath $script:Settings) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
@@ -290,6 +290,7 @@ if (Test-Path -LiteralPath $script:Settings) {
         if ($j.Sd)                 { $script:Cfg.Sd        = [string]$j.Sd }
         if ($j.Publisher)          { $script:Cfg.Publisher = [string]$j.Publisher }
         if ($null -ne $j.Transparent) { $script:Cfg.Transparent = [bool]$j.Transparent }
+        if ($null -ne $j.Sound)    { $script:Cfg.Sound     = [string]$j.Sound }
     } catch {}
 }
 # First run: reuse the key already saved by PS1 Forwarder Creator Plus, if it
@@ -301,6 +302,17 @@ if (-not $script:Cfg.ApiKey) {
             $pj = Get-Content -LiteralPath $plus.FullName -Raw | ConvertFrom-Json
             if ($pj.ApiKey) { $script:Cfg.ApiKey = [string]$pj.ApiKey }
         }
+    } catch {}
+}
+# First run: the PlayStation jingle that PS1 Forwarder Creator ships, if it
+# sits in a neighbouring folder. An empty string means "no sound, keep the
+# template's"; $null means never decided.
+if ($null -eq $script:Cfg.Sound) {
+    $script:Cfg.Sound = ''
+    try {
+        $w = Get-ChildItem -LiteralPath (Split-Path -Parent $script:Root) -Filter 'ps1.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
+             Where-Object { $_.DirectoryName -like '*assets_ps1' } | Select-Object -First 1
+        if ($w) { $script:Cfg.Sound = $w.FullName }
     } catch {}
 }
 function Save-Settings { $script:Cfg | ConvertTo-Json | Set-Content -LiteralPath $script:Settings -Encoding UTF8 }
@@ -498,6 +510,15 @@ $lblTid.Font = New-Object System.Drawing.Font('Consolas', 9)
 $lblTidInfo = New-Label '' 12 404 383
 $lblTidInfo.Height = 36; $lblTidInfo.TextAlign = 'TopLeft'
 
+[void](New-Label 'Sonido:' 12 446 55)
+$lblSound = New-Label '' 68 446 175
+$lblSound.AutoEllipsis = $true
+$btnSound = New-Button 'Elegir...' 246 444 60 26
+$btnSoundPlay = New-Button 'Probar' 308 444 46 26
+$btnSoundClear = New-Button 'Quitar' 356 444 42 26
+$tipSound = New-Object System.Windows.Forms.ToolTip
+$tipSound.SetToolTip($btnSound, 'Sonido al seleccionar el icono en el menu HOME (WAV PCM, mono o estereo, maximo 3 segundos).')
+
 $btnBuild = New-Button 'Crear CIA' 12 476 383 70
 $btnBuild.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
 $progress = Add-Ctl (New-Object System.Windows.Forms.ProgressBar) 12 560 383 18
@@ -550,6 +571,17 @@ $flGrids  = New-Tab 'Portadas (Grids)'
 $flIcons  = New-Tab 'Iconos'
 
 # ---------------------------------------------------------------- GUI logic
+function Update-Sound {
+    $p = $script:Cfg.Sound
+    if ($p -and (Test-Path -LiteralPath $p)) {
+        $lblSound.Text = [IO.Path]::GetFileName($p); $lblSound.ForeColor = [System.Drawing.SystemColors]::ControlText
+        $btnSoundPlay.Enabled = $true; $btnSoundClear.Enabled = $true
+    } else {
+        $lblSound.Text = '(el de la plantilla)'; $lblSound.ForeColor = [System.Drawing.Color]::DimGray
+        $btnSoundPlay.Enabled = $false; $btnSoundClear.Enabled = $false
+    }
+}
+
 function Set-Status([string]$t, [int]$step = -1) {
     $lblStatus.Text = $t
     if ($step -ge 0) { $progress.Value = [Math]::Min($step, $progress.Maximum) }
@@ -756,6 +788,17 @@ $chkAuto.Add_CheckedChanged({ $script:Cfg.AutoPick = $chkAuto.Checked; Save-Sett
 $chkTrans.Add_CheckedChanged({ $script:Cfg.Transparent = $chkTrans.Checked; Save-Settings; Update-Preview })
 $txtPub.Add_Leave({ $script:Cfg.Publisher = $txtPub.Text; Save-Settings })
 $btnSdRefresh.Add_Click({ Refresh-Sd })
+$btnSound.Add_Click({
+    $d = New-Object System.Windows.Forms.OpenFileDialog
+    $d.Filter = 'Sonido WAV (*.wav)|*.wav'
+    if ($script:Cfg.Sound) { $d.InitialDirectory = [IO.Path]::GetDirectoryName($script:Cfg.Sound) }
+    if ($d.ShowDialog() -eq 'OK') { $script:Cfg.Sound = $d.FileName; Save-Settings; Update-Sound }
+})
+$btnSoundClear.Add_Click({ $script:Cfg.Sound = ''; Save-Settings; Update-Sound })
+$btnSoundPlay.Add_Click({
+    try { $sp = New-Object System.Media.SoundPlayer($script:Cfg.Sound); $sp.Play() }
+    catch { Show-Error "No se pudo reproducir:`n$($_.Exception.Message)" }
+})
 $cmbSd.Add_SelectedIndexChanged({
     $script:Cfg.Sd = Get-SdRoot; Save-Settings
     Refresh-Cores
@@ -865,6 +908,7 @@ $btnBuild.Add_Click({
         if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
         if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
         if ((Test-Path -LiteralPath $b) -and (Use-Transparent)) { $cliArgs += ' --transparent' }
+        if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { $cliArgs += " --sound $(Q $script:Cfg.Sound)" }
         $r = Invoke-Cli $cliArgs
         if ($r.ExitCode -ne 0 -or -not $r.OK) {
             $why = $(if ($r.ERROR) { $r.ERROR } elseif ($r.STDERR) { $r.STDERR } else { "codigo $($r.ExitCode)" })
@@ -885,6 +929,7 @@ $btnBuild.Add_Click({
 
 # ---------------------------------------------------------------- start
 Refresh-Sd
+Update-Sound
 Update-Preview
 try { [void]$form.ShowDialog() }
 catch { Show-Error $_.Exception.Message }

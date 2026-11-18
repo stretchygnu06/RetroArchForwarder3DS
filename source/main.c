@@ -25,11 +25,13 @@
 #include "namepick.h"
 #include "idalloc.h"
 #include "sgdb.h"
+#include "cwav.h"
 
 #define OUT_DIR "sdmc:/forwarders"
 #define TEMPLATE "romfs:/template.cia"
 #define PBP_ICON_TMP "sdmc:/forwarders/.pbp_icon.png"
 #define REGISTRY "sdmc:/forwarders/registry.txt"
+#define SOUND_WAV "sdmc:/forwarders/sound.wav"
 #define REGISTRY_MAX (256 * 1024)
 
 static u8* s_cia;
@@ -467,6 +469,38 @@ int main(void)
 		else if (!n)
 			printf("  banner   : template banner kept\n");
 		free(rebuilt);
+	}
+
+	// Sound: sdmc:/forwarders/sound.wav, when there is one, replaces the
+	// template's for every forwarder built.
+	{
+		FILE* f = fopen(SOUND_WAV, "rb");
+		if (f)
+		{
+			long len;
+			uint8_t *wav = NULL, *cw = NULL, *bnr, *out = NULL;
+			size_t clen = 0, room = 0, n = 0;
+			const char* why = "unreadable";
+
+			fseek(f, 0, SEEK_END);
+			len = ftell(f);
+			fseek(f, 0, SEEK_SET);
+			if (len > 0 && len < 8 * 1024 * 1024 && (wav = malloc((size_t)len))
+			    && fread(wav, 1, (size_t)len, f) == (size_t)len)
+				clen = cwavFromWav(wav, (size_t)len, &cw, &why);
+			fclose(f);
+			free(wav);
+
+			bnr = cia_banner_data(&cia, &room);
+			if (clen && bnr && (out = malloc(room)))
+				n = bannerSetSound(bnr, cia_banner_size(&cia), cw, clen, out, room);
+			if (n && cia_set_banner(&cia, out, n) == CIA_OK)
+				printf("  sound    : sound.wav\n");
+			else
+				printf("  sound    : " UI_WARN "%s" UI_OFF ", template kept\n", clen ? "too long" : why);
+			free(out);
+			free(cw);
+		}
 	}
 	cia_set_title_id(&cia, tid);
 

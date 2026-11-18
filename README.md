@@ -6,7 +6,7 @@
 
 Turns a ROM on your SD card into a HOME menu icon that launches it straight in
 **your installed RetroArch**, with your own settings, overrides and saves.
-The game stays on the SD card; the forwarder is a small CIA (about 430 KB)
+The game stays on the SD card; the forwarder is a small CIA (about 700 KB)
 that only starts it.
 
 There are two ways to build one. Both write the same kind of CIA, from the same
@@ -19,6 +19,7 @@ template and the same patching code:
 | Artwork | libretro thumbnails, SteamGridDB logo | SteamGridDB logos, heroes, grids and icons, local images, libretro title screens |
 | Preview | no | banner and icon, live |
 | Transparent banner | no | yes |
+| Banner sound | `sdmc:/forwarders/sound.wav`, if present | pick a WAV, with a play button |
 
 Both read the titles installed on the SD card and the same
 `sdmc:/forwarders/registry.txt`, so they never hand out a title id that is
@@ -62,6 +63,8 @@ Download `fwdgen.3dsx` from the [releases](../../releases), drop it into
 
 With a SteamGridDB API key in `sdmc:/forwarders/steamgriddb.txt`, the banner
 gets the game's logo, see [SteamGridDB logos](#steamgriddb-logos-optional).
+A WAV at `sdmc:/forwarders/sound.wav` becomes the banner sound of every
+forwarder built (PCM, mono or stereo, up to 3 seconds).
 
 ## Usage on Windows
 
@@ -97,7 +100,12 @@ Then, with the console's SD card in the PC:
    background alone. The **transparent banner** option keeps only the logo, so the
    HOME menu shows through. The icon always has a background: icons carry
    no alpha.
-5. **Build the CIA**: it is saved by default to `<SD>\cias\`. Install it
+5. **Sound**: the jingle played when the icon is selected on the HOME menu.
+   Pick any WAV (PCM, 8 or 16 bit, mono or stereo, up to 3 seconds, longer
+   ones are cut). On first run the PlayStation jingle shipped with
+   *PS1 Forwarder Creator* is picked up from a neighbouring folder if there
+   is one. Without a sound, the template's is kept.
+6. **Build the CIA**: it is saved by default to `<SD>\cias\`. Install it
    with FBI.
 
 Rebuilding a game keeps its title id and raises the title version, so the
@@ -127,7 +135,7 @@ fwdgen-pc tid   --sd E: --rom "sdmc:/roms/psx/Game.chd"
 fwdgen-pc build --sd E: --template template.cia --rom "sdmc:/roms/psx/Game.chd" ^
                 --core "sdmc:/retroarch/cores/pcsx_rearmed_libretro.3dsx" ^
                 --name "Game" --tid 000400000FF1C100 --icon icon.png ^
-                --banner banner.png [--transparent] --out Game.cia
+                --banner banner.png [--transparent] [--sound jingle.wav] --out Game.cia
 ```
 
 `tid` prints the id the game would get; `build` refuses an id that belongs
@@ -157,7 +165,7 @@ fields are rewritten, so nothing downstream in the file ever moves:
 | ROM path | `FWD0ROM!` in `.code`, 256 reserved bytes |
 | Core path | `FWD0CRE!` in `.code`, 256 reserved bytes |
 | SMDH titles and icon | `icon` section, always 14016 bytes |
-| Banner | `banner` section, oversized to 256 KB on purpose |
+| Banner | `banner` section, oversized to 512 KB on purpose |
 | Title id and version | NCCH header, ExHeader, TMD and ticket |
 
 The whole hash chain is then recomputed, leaf to root:
@@ -302,8 +310,17 @@ order — the same tiling as icons, which are RGB565.
 The app inflates the CGFX, swaps the texture, recompresses and re-appends the
 audio with its offset fixed. The LZ11 encoder emits literals only, never back
 references: eight times simpler to implement, at the cost of 12.5% in size.
-That is why the banner section is reserved at 256 KB, and why each forwarder
-weighs about 430 KB.
+That, and room for a 3-second sound, is why the banner section is reserved at
+512 KB.
+
+### Banner sound
+
+The sound sits after the CGFX in the CBMD, as a CWAV (offset at `0x84`). A WAV
+becomes a PCM16 CWAV laid out exactly as bannertool writes it (checked byte for
+byte against it), and replaces the template's. Three seconds of stereo PCM16
+at 32 kHz is 375 KB, so the template reserves **512 KB** for the banner
+(`tools/grow_banner.py` enlarged it from 256 KB). Each forwarder is about
+700 KB as a result.
 
 ### Title version
 
@@ -379,7 +396,8 @@ gcc -O2 -DINDEX_DIR='"romfs/db"' -o host/test_meta host/test_meta.c source/metad
 
 ## Limitations
 
-- The banner reservation makes every forwarder about 430 KB.
+- The banner reservation (512 KB, to fit a 3-second sound) makes every
+  forwarder about 700 KB.
 - Names are reduced to ASCII in the SMDH titles.
 - ROM and core paths are limited to 255 bytes each.
 - The forwarder targets a **path**, so changing core version means replacing

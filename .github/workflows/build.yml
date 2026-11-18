@@ -28,6 +28,8 @@ jobs:
           gcc -O2 -Wall -o build-host/test_meta   host/test_meta.c   source/metadata.c
           gcc -O2 -Wall -o build-host/test_idalloc host/test_idalloc.c source/idalloc.c source/sha256.c
           gcc -O2 -Wall -o build-host/test_sgdbterm host/test_sgdbterm.c source/sgdbterm.c
+          gcc -O2 -Wall -o build-host/test_cwav host/test_cwav.c source/cwav.c
+          gcc -O2 -Wall -o build-host/reseal host/reseal.c source/cia_patch.c source/sha256.c
           gcc -O2 -w     -o build-host/test_compose host/test_compose.c source/bannergen.c source/icongen.c -lm
 
       # Only the self-contained ones run here. test_icon, test_banner,
@@ -41,6 +43,7 @@ jobs:
           ./build-host/test_scrub
           ./build-host/test_idalloc
           ./build-host/test_sgdbterm
+          ./build-host/test_cwav
 
   build:
     runs-on: ubuntu-latest

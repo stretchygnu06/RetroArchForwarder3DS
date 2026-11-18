@@ -38,8 +38,11 @@ int cia_set_titles(cia_t* cia, const char* name, const char* publisher);
 // Pointer to the SMDH inside the ExeFS, to patch the icon in place.
 uint8_t* cia_icon_data(cia_t* cia);
 
-// Returns a pointer to the banner and the size reserved for it.
+// Returns a pointer to the banner and the room reserved for it.
 uint8_t* cia_banner_data(cia_t* cia, size_t* reserved);
+
+// Size of the banner currently written (the declared ExeFS section size).
+size_t cia_banner_size(cia_t* cia);
 
 // Writes a banner into the reserved room and declares its size.
 int cia_set_banner(cia_t* cia, const uint8_t* blob, size_t len);
