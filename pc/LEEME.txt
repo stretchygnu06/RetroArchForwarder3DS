@@ -25,12 +25,12 @@ USO
    Marca "Banner transparente" si quieres solo el logo, sin fondo: se ve
    el fondo del menu HOME (el icono siempre lleva fondo).
    "Sonido": el sonido al seleccionar el icono en el menu HOME. Va por
-   sistema: el de PlayStation solo se usa en juegos de PlayStation. Elige
-   un WAV (maximo 3 segundos) con un juego de ese sistema abierto;
-   "Probar" lo reproduce. Un sistema sin sonido no suena (la plantilla
-   trae 1 segundo de silencio). La primera vez toma solo el ps1.wav de PS1 Forwarder
-   Creator y el gba.wav de rarch3ds_forwarder_creator si estan en una
-   carpeta vecina.
+   sistema: el que elijas con un juego de PlayStation solo se usa en
+   juegos de PlayStation. Elige un WAV (maximo 3 segundos); "Probar" lo
+   reproduce. Al principio ningun sistema tiene sonido: el icono no suena
+   (la plantilla trae 1 segundo de silencio) hasta que elijas uno.
+   "Publisher": se llena solo con la plataforma del juego (PlayStation,
+   Game Boy, Super Nintendo...). Puedes cambiarlo antes de crear el CIA.
 4. "Crear CIA". Por defecto se guarda en <SD>\cias\.
 5. En la 3DS: FBI > SD > cias > instala el CIA.
 

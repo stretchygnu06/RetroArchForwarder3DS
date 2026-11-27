@@ -281,23 +281,16 @@ public static class FwdArt
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sounds = $null; LastRomDir = ''; LastBatchDir = '' }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Transparent = $false; Sounds = @{}; LastRomDir = ''; LastBatchDir = '' }
 if (Test-Path -LiteralPath $script:Settings) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
         if ($j.ApiKey)             { $script:Cfg.ApiKey    = [string]$j.ApiKey }
         if ($null -ne $j.AutoPick) { $script:Cfg.AutoPick  = [bool]$j.AutoPick }
         if ($j.Sd)                 { $script:Cfg.Sd        = [string]$j.Sd }
-        if ($j.Publisher)          { $script:Cfg.Publisher = [string]$j.Publisher }
         if ($null -ne $j.Transparent) { $script:Cfg.Transparent = [bool]$j.Transparent }
         if ($null -ne $j.Sounds) {
-            $script:Cfg.Sounds = @{}
             foreach ($pr in $j.Sounds.PSObject.Properties) { $script:Cfg.Sounds[$pr.Name] = [string]$pr.Value }
-        } elseif ($null -ne $j.Sound) {
-            # Settings from before sounds were per system: that one was the PS1 jingle.
-            $script:Cfg.Sounds = @{}
-            if ($j.Sound) { $script:Cfg.Sounds['Sony - PlayStation'] = [string]$j.Sound }
-            $script:SoundsMigrated = $true
         }
         if ($j.LastRomDir)         { $script:Cfg.LastRomDir   = [string]$j.LastRomDir }
         if ($j.LastBatchDir)       { $script:Cfg.LastBatchDir = [string]$j.LastBatchDir }
@@ -314,44 +307,9 @@ if (-not $script:Cfg.ApiKey) {
         }
     } catch {}
 }
-# Sounds are per system: the PS1 jingle has no business on a NES game. A
-# system without one keeps the template's sound, which is one second of
-# silence.
-#
-# First run: the PlayStation jingle that PS1 Forwarder Creator ships, and the
-# Game Boy Advance one of its sibling (rarch3ds_forwarder_creator), if either
-# sits in a neighbouring folder.
-if ($null -eq $script:Cfg.Sounds -or $script:SoundsMigrated) {
-    if ($null -eq $script:Cfg.Sounds) { $script:Cfg.Sounds = @{} }
-    $parent = Split-Path -Parent $script:Root
-    if (-not $script:Cfg.Sounds.ContainsKey('Sony - PlayStation')) { try {
-        $w = Get-ChildItem -LiteralPath $parent -Filter 'ps1.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
-             Where-Object { $_.DirectoryName -like '*assets_ps1' } | Select-Object -First 1
-        if ($w) { $script:Cfg.Sounds['Sony - PlayStation'] = $w.FullName }
-    } catch {} }
-    try {
-        $g = Get-ChildItem -LiteralPath $parent -Filter 'gba.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
-             Where-Object { $_.DirectoryName -like '*assets_gba' } | Select-Object -First 1
-        if ($g) { $script:Cfg.Sounds['Nintendo - Game Boy Advance'] = $g.FullName }
-        else {
-            $zip = Get-ChildItem -LiteralPath $parent -Filter 'rarch3ds_forwarder_creator*.zip' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($zip) {
-                Add-Type -AssemblyName System.IO.Compression.FileSystem
-                $z = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
-                try {
-                    $en = $z.Entries | Where-Object { $_.FullName -like '*assets_gba/gba.wav' } | Select-Object -First 1
-                    if ($en) {
-                        $dir = Join-Path $script:Root 'sounds'
-                        if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
-                        $dest = Join-Path $dir 'gba.wav'
-                        [IO.Compression.ZipFileExtensions]::ExtractToFile($en, $dest, $true)
-                        $script:Cfg.Sounds['Nintendo - Game Boy Advance'] = $dest
-                    }
-                } finally { $z.Dispose() }
-            }
-        }
-    } catch {}
-}
+# Sounds are per system: the PS1 jingle has no business on a NES game. None
+# is set until the user picks one; a system without one stays silent (the
+# template's sound is one second of silence).
 
 # Folders are remembered relative to the SD card ("\roms\psx"), so they still
 # work when Windows gives the card another drive letter.
@@ -636,7 +594,9 @@ $cmbCore.DropDownStyle = 'DropDownList'
 $txtName = New-TextBox 105 320 290 ''
 $txtName.MaxLength = 64
 [void](New-Label 'Publisher:' 12 350 90)
-$txtPub = New-TextBox 105 350 290 $script:Cfg.Publisher
+$txtPub = New-TextBox 105 350 290 'RetroArch'
+$tipPub = New-Object System.Windows.Forms.ToolTip
+$tipPub.SetToolTip($txtPub, 'Se llena solo con la plataforma del juego (PlayStation, Game Boy...). Puedes cambiarlo antes de crear el CIA.')
 $txtPub.MaxLength = 64
 
 [void](New-Label 'Title ID:' 12 382 90)
@@ -717,6 +677,35 @@ function Get-ShortSystem([string]$sys) {
     $parts = $sys -split ' - '
     return $(if ($parts.Count -gt 1) { ($parts[1..($parts.Count - 1)] -join ' - ') } else { $sys })
 }
+# What the HOME menu shows as the publisher: the platform the game is for.
+$script:PlatformNames = @{
+    'Sony - PlayStation' = 'PlayStation'
+    'Nintendo - Nintendo Entertainment System' = 'NES'
+    'Nintendo - Family Computer Disk System' = 'Famicom Disk System'
+    'Nintendo - Super Nintendo Entertainment System' = 'Super Nintendo'
+    'Nintendo - Game Boy' = 'Game Boy'
+    'Nintendo - Game Boy Color' = 'Game Boy Color'
+    'Nintendo - Game Boy Advance' = 'Game Boy Advance'
+    'Nintendo - Virtual Boy' = 'Virtual Boy'
+    'Atari - 2600' = 'Atari 2600'
+    'Atari - Lynx' = 'Atari Lynx'
+    'Sega - Mega Drive - Genesis' = 'Sega Genesis'
+    'Sega - 32X' = 'Sega 32X'
+    'Sega - Master System - Mark III' = 'Sega Master System'
+    'Sega - Game Gear' = 'Sega Game Gear'
+    'NEC - PC Engine - TurboGrafx 16' = 'TurboGrafx-16'
+    'SNK - Neo Geo Pocket' = 'Neo Geo Pocket'
+    'SNK - Neo Geo Pocket Color' = 'Neo Geo Pocket Color'
+    'Bandai - WonderSwan' = 'WonderSwan'
+    'Bandai - WonderSwan Color' = 'WonderSwan Color'
+    'Coleco - ColecoVision' = 'ColecoVision'
+}
+function Get-PlatformName([string]$sys) {
+    if ($sys -and $script:PlatformNames.ContainsKey($sys)) { return $script:PlatformNames[$sys] }
+    if ($sys) { return (Get-ShortSystem $sys) }
+    return 'RetroArch'
+}
+
 function Get-SoundFor([string]$sys) {
     if ($sys -and $script:Cfg.Sounds.ContainsKey($sys)) {
         $p = $script:Cfg.Sounds[$sys]
@@ -948,9 +937,8 @@ $btnSearch.Add_Click({ Search-Games $txtSearch.Text.Trim() })
 $txtSearch.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq 'Enter') { $e.SuppressKeyPress = $true; Search-Games $txtSearch.Text.Trim() } })
 $chkAuto.Add_CheckedChanged({ $script:Cfg.AutoPick = $chkAuto.Checked; Save-Settings })
 $chkTrans.Add_CheckedChanged({ $script:Cfg.Transparent = $chkTrans.Checked; Save-Settings; Update-Preview })
-$txtPub.Add_Leave({ $script:Cfg.Publisher = $txtPub.Text; Save-Settings })
 $btnSdRefresh.Add_Click({ Refresh-Sd })
-$cmbCore.Add_SelectedIndexChanged({ Update-Sound })
+$cmbCore.Add_SelectedIndexChanged({ Update-Sound; $txtPub.Text = Get-PlatformName (Get-CurrentSystem) })
 $btnSound.Add_Click({
     $d = New-Object System.Windows.Forms.OpenFileDialog
     $d.Filter = 'Sonido WAV (*.wav)|*.wav'
@@ -1015,6 +1003,7 @@ function Load-Game([string]$file) {
     $txtName.Text = $clean
     $core = Find-Core $file
     if ($core) { $cmbCore.SelectedItem = $core }
+    $txtPub.Text = Get-PlatformName (Get-CurrentSystem)
     Update-Sound
 
     # local art first (logos\, covers\, icons\), then libretro, then SteamGridDB
@@ -1056,7 +1045,7 @@ $btnRom.Add_Click({
 # ---------------------------------------------------------------- build
 # Builds one CIA: picks the title id, renders the art, runs fwdgen-pc.
 # Returns @{ Tid; Version; Status } or throws.
-function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem, [string]$romFile = $script:Rom) {
+function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem, [string]$romFile = $script:Rom, [string]$publisher = $txtPub.Text) {
     $sd = Get-SdRoot
     $t = Invoke-Cli ("tid --sd {0} --rom {1}" -f (Q $sd), (Q $sdRom))
     if ($t.ERROR -or -not $t.TID) { throw "Title ID: $(if ($t.ERROR) { $t.ERROR } else { 'sin respuesta' })" }
@@ -1067,7 +1056,7 @@ function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo,
 
     $name = ($name -replace '"', '').Trim()
     $cliArgs = "build --sd {0} --template {1} --rom {2} --core {3} --name {4} --publisher {5} --tid {6} --out {7}" -f `
-        (Q $sd), (Q $script:Template), (Q $sdRom), (Q $core), (Q $name), (Q (($txtPub.Text -replace '"', '').Trim())), $t.TID, (Q $out)
+        (Q $sd), (Q $script:Template), (Q $sdRom), (Q $core), (Q $name), (Q $(if (($publisher -replace '"', '').Trim()) { ($publisher -replace '"', '').Trim() } else { 'RetroArch' })), $t.TID, (Q $out)
     if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
     if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
     if ((Test-Path -LiteralPath $b) -and $transparent -and $logo) { $cliArgs += ' --transparent' }
@@ -1394,7 +1383,7 @@ function Show-Batch {
 
                 $it.SubItems[3].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
                 $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
-                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core $g.File
+                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core $g.File (Get-PlatformName (Get-ThumbSystem $g.File $g.Core))
                 $it.SubItems[3].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
                 $it.ForeColor = [System.Drawing.Color]::DarkGreen
                 $it.Checked = $false
@@ -1428,7 +1417,7 @@ function Show-Batch {
 $btnBatch.Add_Click({ Show-Batch })
 
 # ---------------------------------------------------------------- start
-Save-Settings          # keeps what the first run found (sounds, API key)
+Save-Settings          # keeps what the first run found (the API key)
 Refresh-Sd
 Update-Sound
 Update-Preview

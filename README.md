@@ -86,7 +86,9 @@ Then, with the console's SD card in the PC:
 1. **SD**: detected by its `Nintendo 3DS` folder. The cores found on it fill
    the *Core* list.
 2. **Game**: pick it on that card, since the forwarder opens it from there.
-   Its file name, without region or disc tags, becomes the title, and the title id
+   Its file name, without region or disc tags, becomes the title, the
+   platform (*PlayStation*, *Game Boy*, *Super Nintendo*...) the publisher
+   shown on the HOME menu, and the title id
    it will get is shown with the reason: free, an update of this game's
    forwarder, or moved because another title holds the hashed id.
 3. **Artwork**, in order of priority:
@@ -101,13 +103,11 @@ Then, with the console's SD card in the PC:
    HOME menu shows through. The icon always has a background: icons carry
    no alpha.
 5. **Sound**: the jingle played when the icon is selected on the HOME menu,
-   **one per system**: the PlayStation jingle only goes on PlayStation games.
-   Pick any WAV (PCM, 8 or 16 bit, mono or stereo, up to 3 seconds, longer
-   ones are cut) while a game of that system is open. A system without one
-   stays silent: the template's sound is one second of silence. On first run the PlayStation jingle of
-   *PS1 Forwarder Creator* and the Game Boy Advance one of
-   *rarch3ds_forwarder_creator* are picked up from a neighbouring folder if
-   they are there.
+   **one per system**: a sound picked with a PlayStation game open only goes
+   on PlayStation games. Pick any WAV (PCM, 8 or 16 bit, mono or stereo, up
+   to 3 seconds, longer ones are cut). No system has one at first: until one
+   is picked the icon stays silent (the template's sound is one second of
+   silence).
 6. **Build the CIA**: it is saved by default to `<SD>\cias\`. Install it
    with FBI.
 
