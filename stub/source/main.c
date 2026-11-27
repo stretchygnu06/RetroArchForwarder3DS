@@ -114,7 +114,9 @@ int main(void)
 	say("\x1b[2;3H"); say(name ? name + 1 : rom);
 	say("\n\n  Starting RetroArch...\n");
 
-	rc = srvGetServiceHandle(&hbldr, "hb:ldr");
+	// hb:ldr is a named port in Luma3DS, not a service registered with srv:
+	// asking srv for it waits forever.
+	rc = svcConnectToPort(&hbldr, "hb:ldr");
 	if (R_FAILED(rc)) { fail("connecting to hb:ldr", rc); gfxExit(); return 0; }
 
 	// hb:ldr wants the target without the archive prefix.
