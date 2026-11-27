@@ -19,7 +19,7 @@ template and the same patching code:
 | Artwork | libretro thumbnails, SteamGridDB logo | SteamGridDB logos, heroes, grids and icons, local images, libretro title screens |
 | Preview | no | banner and icon, live |
 | Transparent banner | no | yes |
-| Banner sound | `sdmc:/forwarders/sound.wav`, if present | pick a WAV, with a play button |
+| Banner sound | `sdmc:/forwarders/sound.wav`, if present | a WAV per system, with a play button |
 
 Both read the titles installed on the SD card and the same
 `sdmc:/forwarders/registry.txt`, so they never hand out a title id that is
@@ -100,11 +100,14 @@ Then, with the console's SD card in the PC:
    background alone. The **transparent banner** option keeps only the logo, so the
    HOME menu shows through. The icon always has a background: icons carry
    no alpha.
-5. **Sound**: the jingle played when the icon is selected on the HOME menu.
+5. **Sound**: the jingle played when the icon is selected on the HOME menu,
+   **one per system**: the PlayStation jingle only goes on PlayStation games.
    Pick any WAV (PCM, 8 or 16 bit, mono or stereo, up to 3 seconds, longer
-   ones are cut). On first run the PlayStation jingle shipped with
-   *PS1 Forwarder Creator* is picked up from a neighbouring folder if there
-   is one. Without a sound, the template's is kept.
+   ones are cut) while a game of that system is open. A system without one
+   keeps the template's sound. On first run the PlayStation jingle of
+   *PS1 Forwarder Creator* and the Game Boy Advance one of
+   *rarch3ds_forwarder_creator* are picked up from a neighbouring folder if
+   they are there.
 6. **Build the CIA**: it is saved by default to `<SD>\cias\`. Install it
    with FBI.
 

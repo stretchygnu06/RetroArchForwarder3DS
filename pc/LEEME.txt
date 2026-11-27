@@ -24,9 +24,12 @@ USO
    Sin API key se usa la pantalla de titulo de libretro como fondo.
    Marca "Banner transparente" si quieres solo el logo, sin fondo: se ve
    el fondo del menu HOME (el icono siempre lleva fondo).
-   "Sonido": el sonido al seleccionar el icono en el menu HOME. Elige
-   cualquier WAV (maximo 3 segundos); "Probar" lo reproduce. La primera
-   vez toma solo el ps1.wav de PS1 Forwarder Creator si esta en una
+   "Sonido": el sonido al seleccionar el icono en el menu HOME. Va por
+   sistema: el de PlayStation solo se usa en juegos de PlayStation. Elige
+   un WAV (maximo 3 segundos) con un juego de ese sistema abierto;
+   "Probar" lo reproduce. Un sistema sin sonido propio lleva el de la
+   plantilla. La primera vez toma solo el ps1.wav de PS1 Forwarder
+   Creator y el gba.wav de rarch3ds_forwarder_creator si estan en una
    carpeta vecina.
 4. "Crear CIA". Por defecto se guarda en <SD>\cias\.
 5. En la 3DS: FBI > SD > cias > instala el CIA.

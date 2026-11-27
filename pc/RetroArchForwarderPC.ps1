@@ -281,7 +281,7 @@ public static class FwdArt
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sound = $null; LastRomDir = ''; LastBatchDir = '' }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sounds = $null; LastRomDir = ''; LastBatchDir = '' }
 if (Test-Path -LiteralPath $script:Settings) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
@@ -290,7 +290,15 @@ if (Test-Path -LiteralPath $script:Settings) {
         if ($j.Sd)                 { $script:Cfg.Sd        = [string]$j.Sd }
         if ($j.Publisher)          { $script:Cfg.Publisher = [string]$j.Publisher }
         if ($null -ne $j.Transparent) { $script:Cfg.Transparent = [bool]$j.Transparent }
-        if ($null -ne $j.Sound)    { $script:Cfg.Sound     = [string]$j.Sound }
+        if ($null -ne $j.Sounds) {
+            $script:Cfg.Sounds = @{}
+            foreach ($pr in $j.Sounds.PSObject.Properties) { $script:Cfg.Sounds[$pr.Name] = [string]$pr.Value }
+        } elseif ($null -ne $j.Sound) {
+            # Settings from before sounds were per system: that one was the PS1 jingle.
+            $script:Cfg.Sounds = @{}
+            if ($j.Sound) { $script:Cfg.Sounds['Sony - PlayStation'] = [string]$j.Sound }
+            $script:SoundsMigrated = $true
+        }
         if ($j.LastRomDir)         { $script:Cfg.LastRomDir   = [string]$j.LastRomDir }
         if ($j.LastBatchDir)       { $script:Cfg.LastBatchDir = [string]$j.LastBatchDir }
     } catch {}
@@ -306,17 +314,44 @@ if (-not $script:Cfg.ApiKey) {
         }
     } catch {}
 }
-# First run: the PlayStation jingle that PS1 Forwarder Creator ships, if it
-# sits in a neighbouring folder. An empty string means "no sound, keep the
-# template's"; $null means never decided.
-if ($null -eq $script:Cfg.Sound) {
-    $script:Cfg.Sound = ''
-    try {
-        $w = Get-ChildItem -LiteralPath (Split-Path -Parent $script:Root) -Filter 'ps1.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
+# Sounds are per system: the PS1 jingle has no business on a NES game. A
+# system without one keeps the template's sound.
+#
+# First run: the PlayStation jingle that PS1 Forwarder Creator ships, and the
+# Game Boy Advance one of its sibling (rarch3ds_forwarder_creator), if either
+# sits in a neighbouring folder.
+if ($null -eq $script:Cfg.Sounds -or $script:SoundsMigrated) {
+    if ($null -eq $script:Cfg.Sounds) { $script:Cfg.Sounds = @{} }
+    $parent = Split-Path -Parent $script:Root
+    if (-not $script:Cfg.Sounds.ContainsKey('Sony - PlayStation')) { try {
+        $w = Get-ChildItem -LiteralPath $parent -Filter 'ps1.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
              Where-Object { $_.DirectoryName -like '*assets_ps1' } | Select-Object -First 1
-        if ($w) { $script:Cfg.Sound = $w.FullName }
+        if ($w) { $script:Cfg.Sounds['Sony - PlayStation'] = $w.FullName }
+    } catch {} }
+    try {
+        $g = Get-ChildItem -LiteralPath $parent -Filter 'gba.wav' -Recurse -Depth 4 -File -ErrorAction SilentlyContinue |
+             Where-Object { $_.DirectoryName -like '*assets_gba' } | Select-Object -First 1
+        if ($g) { $script:Cfg.Sounds['Nintendo - Game Boy Advance'] = $g.FullName }
+        else {
+            $zip = Get-ChildItem -LiteralPath $parent -Filter 'rarch3ds_forwarder_creator*.zip' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($zip) {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $z = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+                try {
+                    $en = $z.Entries | Where-Object { $_.FullName -like '*assets_gba/gba.wav' } | Select-Object -First 1
+                    if ($en) {
+                        $dir = Join-Path $script:Root 'sounds'
+                        if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
+                        $dest = Join-Path $dir 'gba.wav'
+                        [IO.Compression.ZipFileExtensions]::ExtractToFile($en, $dest, $true)
+                        $script:Cfg.Sounds['Nintendo - Game Boy Advance'] = $dest
+                    }
+                } finally { $z.Dispose() }
+            }
+        }
     } catch {}
 }
+
 # Folders are remembered relative to the SD card ("\roms\psx"), so they still
 # work when Windows gives the card another drive letter.
 function Get-RememberedDir([string]$sd, [string]$rel) {
@@ -611,12 +646,13 @@ $lblTidInfo.Height = 36; $lblTidInfo.TextAlign = 'TopLeft'
 
 [void](New-Label 'Sonido:' 12 446 55)
 $lblSound = New-Label '' 68 446 175
+$tipSoundLbl = New-Object System.Windows.Forms.ToolTip
 $lblSound.AutoEllipsis = $true
 $btnSound = New-Button 'Elegir...' 246 444 60 26
 $btnSoundPlay = New-Button 'Probar' 308 444 46 26
 $btnSoundClear = New-Button 'Quitar' 356 444 42 26
 $tipSound = New-Object System.Windows.Forms.ToolTip
-$tipSound.SetToolTip($btnSound, 'Sonido al seleccionar el icono en el menu HOME (WAV PCM, mono o estereo, maximo 3 segundos).')
+$tipSound.SetToolTip($btnSound, 'Sonido al seleccionar el icono en el menu HOME, para el sistema del juego elegido (WAV PCM, mono o estereo, maximo 3 segundos).')
 
 $btnBuild = New-Button 'Crear CIA' 12 476 383 70
 $btnBuild.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
@@ -670,15 +706,37 @@ $flGrids  = New-Tab 'Portadas (Grids)'
 $flIcons  = New-Tab 'Iconos'
 
 # ---------------------------------------------------------------- GUI logic
+# The system of the game in the main window, or of the chosen core.
+function Get-CurrentSystem {
+    if ($script:Rom) { $sys = Get-ThumbSystem $script:Rom $cmbCore.Text; if ($sys) { return $sys } }
+    return (Get-System $cmbCore.Text)
+}
+function Get-ShortSystem([string]$sys) {
+    if (-not $sys) { return 'este core' }
+    $parts = $sys -split ' - '
+    return $(if ($parts.Count -gt 1) { ($parts[1..($parts.Count - 1)] -join ' - ') } else { $sys })
+}
+function Get-SoundFor([string]$sys) {
+    if ($sys -and $script:Cfg.Sounds.ContainsKey($sys)) {
+        $p = $script:Cfg.Sounds[$sys]
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    }
+    return $null
+}
+
 function Update-Sound {
-    $p = $script:Cfg.Sound
-    if ($p -and (Test-Path -LiteralPath $p)) {
-        $lblSound.Text = [IO.Path]::GetFileName($p); $lblSound.ForeColor = [System.Drawing.SystemColors]::ControlText
+    $sys = Get-CurrentSystem
+    $p = Get-SoundFor $sys
+    $short = Get-ShortSystem $sys
+    if ($p) {
+        $lblSound.Text = "${short}: $([IO.Path]::GetFileName($p))"; $lblSound.ForeColor = [System.Drawing.SystemColors]::ControlText
         $btnSoundPlay.Enabled = $true; $btnSoundClear.Enabled = $true
     } else {
-        $lblSound.Text = '(el de la plantilla)'; $lblSound.ForeColor = [System.Drawing.Color]::DimGray
+        $lblSound.Text = "${short}: el de la plantilla"; $lblSound.ForeColor = [System.Drawing.Color]::DimGray
         $btnSoundPlay.Enabled = $false; $btnSoundClear.Enabled = $false
     }
+    $btnSound.Enabled = [bool]$sys
+    $tipSoundLbl.SetToolTip($lblSound, $(if ($p) { $p } else { 'Sin sonido propio para este sistema: el CIA lleva el de la plantilla.' }))
 }
 
 function Set-Status([string]$t, [int]$step = -1) {
@@ -891,15 +949,20 @@ $chkAuto.Add_CheckedChanged({ $script:Cfg.AutoPick = $chkAuto.Checked; Save-Sett
 $chkTrans.Add_CheckedChanged({ $script:Cfg.Transparent = $chkTrans.Checked; Save-Settings; Update-Preview })
 $txtPub.Add_Leave({ $script:Cfg.Publisher = $txtPub.Text; Save-Settings })
 $btnSdRefresh.Add_Click({ Refresh-Sd })
+$cmbCore.Add_SelectedIndexChanged({ Update-Sound })
 $btnSound.Add_Click({
     $d = New-Object System.Windows.Forms.OpenFileDialog
     $d.Filter = 'Sonido WAV (*.wav)|*.wav'
-    if ($script:Cfg.Sound) { $d.InitialDirectory = [IO.Path]::GetDirectoryName($script:Cfg.Sound) }
-    if ($d.ShowDialog() -eq 'OK') { $script:Cfg.Sound = $d.FileName; Save-Settings; Update-Sound }
+    $sys = Get-CurrentSystem
+    if (-not $sys) { return }
+    $cur = Get-SoundFor $sys
+    $d.InitialDirectory = $(if ($cur) { [IO.Path]::GetDirectoryName($cur) } else { $script:Root })
+    $d.Title = "Sonido para $(Get-ShortSystem $sys)"
+    if ($d.ShowDialog() -eq 'OK') { $script:Cfg.Sounds[$sys] = $d.FileName; Save-Settings; Update-Sound }
 })
-$btnSoundClear.Add_Click({ $script:Cfg.Sound = ''; Save-Settings; Update-Sound })
+$btnSoundClear.Add_Click({ $sys = Get-CurrentSystem; if ($sys) { $script:Cfg.Sounds.Remove($sys); Save-Settings }; Update-Sound })
 $btnSoundPlay.Add_Click({
-    try { $sp = New-Object System.Media.SoundPlayer($script:Cfg.Sound); $sp.Play() }
+    try { $sp = New-Object System.Media.SoundPlayer((Get-SoundFor (Get-CurrentSystem))); $sp.Play() }
     catch { Show-Error "No se pudo reproducir:`n$($_.Exception.Message)" }
 })
 $cmbSd.Add_SelectedIndexChanged({
@@ -951,6 +1014,7 @@ function Load-Game([string]$file) {
     $txtName.Text = $clean
     $core = Find-Core $file
     if ($core) { $cmbCore.SelectedItem = $core }
+    Update-Sound
 
     # local art first (logos\, covers\, icons\), then libretro, then SteamGridDB
     $names = @($script:GameName, $clean)
@@ -991,7 +1055,7 @@ $btnRom.Add_Click({
 # ---------------------------------------------------------------- build
 # Builds one CIA: picks the title id, renders the art, runs fwdgen-pc.
 # Returns @{ Tid; Version; Status } or throws.
-function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem) {
+function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem, [string]$romFile = $script:Rom) {
     $sd = Get-SdRoot
     $t = Invoke-Cli ("tid --sd {0} --rom {1}" -f (Q $sd), (Q $sdRom))
     if ($t.ERROR -or -not $t.TID) { throw "Title ID: $(if ($t.ERROR) { $t.ERROR } else { 'sin respuesta' })" }
@@ -1006,7 +1070,8 @@ function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo,
     if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
     if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
     if ((Test-Path -LiteralPath $b) -and $transparent -and $logo) { $cliArgs += ' --transparent' }
-    if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { $cliArgs += " --sound $(Q $script:Cfg.Sound)" }
+    $sound = Get-SoundFor (Get-ThumbSystem $romFile $core)
+    if ($sound) { $cliArgs += " --sound $(Q $sound)" }
     $r = Invoke-Cli $cliArgs
     if ($r.ExitCode -ne 0 -or -not $r.OK) {
         $why = $(if ($r.ERROR) { $r.ERROR } elseif ($r.STDERR) { $r.STDERR } else { "codigo $($r.ExitCode)" })
@@ -1203,8 +1268,7 @@ function Show-Batch {
     $chkSg.Checked = [bool]$txtKey.Text.Trim(); $chkSg.Enabled = [bool]$txtKey.Text.Trim()
     $lblOpts = BAdd (New-Object System.Windows.Forms.Label) 380 64 370 22
     $lblOpts.TextAlign = 'MiddleLeft'; $lblOpts.ForeColor = [System.Drawing.Color]::DimGray
-    $snd = $(if ($script:Cfg.Sound -and (Test-Path -LiteralPath $script:Cfg.Sound)) { [IO.Path]::GetFileName($script:Cfg.Sound) } else { 'el de la plantilla' })
-    $lblOpts.Text = "Banner transparente: $(if ($chkTrans.Checked) { 'si' } else { 'no' })   Sonido: $snd"
+    $lblOpts.Text = "Banner transparente: $(if ($chkTrans.Checked) { 'si' } else { 'no' })   Sonido: el de cada sistema"
 
     $lv = BAdd (New-Object System.Windows.Forms.ListView) 12 92 736 370
     $lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $true
@@ -1329,7 +1393,7 @@ function Show-Batch {
 
                 $it.SubItems[3].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
                 $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
-                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core
+                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core $g.File
                 $it.SubItems[3].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
                 $it.ForeColor = [System.Drawing.Color]::DarkGreen
                 $it.Checked = $false
@@ -1363,6 +1427,7 @@ function Show-Batch {
 $btnBatch.Add_Click({ Show-Batch })
 
 # ---------------------------------------------------------------- start
+Save-Settings          # keeps what the first run found (sounds, API key)
 Refresh-Sd
 Update-Sound
 Update-Preview
