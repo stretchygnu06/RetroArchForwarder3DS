@@ -104,7 +104,7 @@ Then, with the console's SD card in the PC:
    **one per system**: the PlayStation jingle only goes on PlayStation games.
    Pick any WAV (PCM, 8 or 16 bit, mono or stereo, up to 3 seconds, longer
    ones are cut) while a game of that system is open. A system without one
-   keeps the template's sound. On first run the PlayStation jingle of
+   stays silent: the template's sound is one second of silence. On first run the PlayStation jingle of
    *PS1 Forwarder Creator* and the Game Boy Advance one of
    *rarch3ds_forwarder_creator* are picked up from a neighbouring folder if
    they are there.

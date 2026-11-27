@@ -315,7 +315,8 @@ if (-not $script:Cfg.ApiKey) {
     } catch {}
 }
 # Sounds are per system: the PS1 jingle has no business on a NES game. A
-# system without one keeps the template's sound.
+# system without one keeps the template's sound, which is one second of
+# silence.
 #
 # First run: the PlayStation jingle that PS1 Forwarder Creator ships, and the
 # Game Boy Advance one of its sibling (rarch3ds_forwarder_creator), if either
@@ -732,11 +733,11 @@ function Update-Sound {
         $lblSound.Text = "${short}: $([IO.Path]::GetFileName($p))"; $lblSound.ForeColor = [System.Drawing.SystemColors]::ControlText
         $btnSoundPlay.Enabled = $true; $btnSoundClear.Enabled = $true
     } else {
-        $lblSound.Text = "${short}: el de la plantilla"; $lblSound.ForeColor = [System.Drawing.Color]::DimGray
+        $lblSound.Text = "${short}: sin sonido"; $lblSound.ForeColor = [System.Drawing.Color]::DimGray
         $btnSoundPlay.Enabled = $false; $btnSoundClear.Enabled = $false
     }
     $btnSound.Enabled = [bool]$sys
-    $tipSoundLbl.SetToolTip($lblSound, $(if ($p) { $p } else { 'Sin sonido propio para este sistema: el CIA lleva el de la plantilla.' }))
+    $tipSoundLbl.SetToolTip($lblSound, $(if ($p) { $p } else { 'Sin sonido para este sistema: el icono no suena al seleccionarlo (la plantilla trae 1 segundo de silencio).' }))
 }
 
 function Set-Status([string]$t, [int]$step = -1) {
