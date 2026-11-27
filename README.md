@@ -151,6 +151,13 @@ Launcher title `000400000D921E00`. Luma's loader recognises that title id and
 loads the `.3dsx` with those arguments — the 3dsx loader argv channel, which
 does work.
 
+Before that it points `sdmc:/retroarch/retroarch-salamander.cfg` at the same
+core (its `.cia` when installed, the `.3dsx` otherwise). RetroArch on 3DS is a
+static build: it ignores `-L` and learns which core it is only from that file,
+which holds the last core opened from RetroArch's own menu. Without this step a
+PlayStation game started after a session in Stella shows as
+"Game - Atari 2600" and lands in the history under the wrong core.
+
 ## How the CIA is built
 
 Every forwarder starts from `template/template.cia`, and only fixed-size
@@ -242,9 +249,18 @@ needs [zig](https://ziglang.org) (`pip install ziglang`), which cross-compiles
 `fwdgen-pc.exe` for Windows from Linux, macOS or Windows. The GUI is a plain
 PowerShell script and needs no build.
 
-`template/template.cia` carries the forwarder itself (the code that calls
-`hb:ldr`). It was produced by Python tooling that is not part of this
-repository; `tools/grow_banner.py` enlarged its banner section to 512 KB.
+`template/template.cia` carries the forwarder itself, whose source is
+`stub/source/main.c`. After changing it, rebuild the template with
+
+```
+sh stub/build.sh
+```
+
+which needs devkitARM and libctru (`DEVKITPRO` set, for instance inside the
+`devkitpro/devkitarm` Docker image). It links the stub, writes its segments
+into the template's `.code` and exheader with `tools/inject_stub.py`, and
+reseals the CIA. The other sections stay where they are, so the code must fit
+in the room before the banner; `tools/grow_banner.py` gave the banner 512 KB.
 
 ## Tests
 
