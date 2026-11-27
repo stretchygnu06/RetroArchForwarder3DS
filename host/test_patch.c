@@ -1,4 +1,4 @@
-// Host harness: reproduces exactly what the console app does, so its output
+// Host harness: reproduces exactly what fwdgen-pc does, so its output
 // can be compared against the Python reference.
 #include <stdio.h>
 #include <stdlib.h>

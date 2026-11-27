@@ -1,7 +1,7 @@
 RetroArch Forwarder PC
 ======================
 
-Crea en Windows el mismo CIA que fwdgen.3dsx: un icono en el menu HOME que
+Crea en Windows un forwarder (CIA): un icono en el menu HOME que
 abre un juego de tu SD directamente en tu RetroArch instalado, con tu
 configuracion, tus overrides y tus partidas de siempre.
 
@@ -24,12 +24,54 @@ USO
    Sin API key se usa la pantalla de titulo de libretro como fondo.
    Marca "Banner transparente" si quieres solo el logo, sin fondo: se ve
    el fondo del menu HOME (el icono siempre lleva fondo).
+   "Sonido": el sonido al seleccionar el icono en el menu HOME. Va por
+   sistema: el que elijas con un juego de PlayStation solo se usa en
+   juegos de PlayStation. Elige un WAV (maximo 3 segundos); "Probar" lo
+   reproduce. Al principio ningun sistema tiene sonido: el icono no suena
+   (la plantilla trae 1 segundo de silencio) hasta que elijas uno.
+   "Publisher": se llena solo con la plataforma del juego (PlayStation,
+   Game Boy, Super Nintendo...). Puedes cambiarlo antes de crear el CIA.
 4. "Crear CIA". Por defecto se guarda en <SD>\cias\.
 5. En la 3DS: FBI > SD > cias > instala el CIA.
 
+PORTADAS DE LIBRETRO
+- "Icono: portada de libretro": el icono es la portada del juego
+  (Named_Boxarts de libretro), entera, sobre ella misma difuminada.
+  Un icono tuyo en icons\ sigue teniendo prioridad.
+- "Banner: portada de libretro": el banner es la portada en lugar del
+  logo y el fondo. Con "Banner transparente" queda la portada sola.
+- Las imagenes de libretro se bajan de sus repositorios de GitHub
+  (thumbnails.libretro.com queda de respaldo). No necesitan cuenta.
+
+VARIOS JUEGOS A LA VEZ
+- "Varios juegos..." abre una lista con todos los juegos de una carpeta de
+  la SD (y sus subcarpetas, si marcas la casilla).
+- Si hay un .m3u, aparece solo el .m3u y no sus discos. Si un juego tiene
+  "(Disc 1)", "(Disc 2)"... sin .m3u, se crea el .m3u al hacer los CIAs.
+- Los .bin de un .cue no aparecen, y si un juego esta en dos formatos
+  (por ejemplo .chd y .cue) solo se marca el mejor.
+- Los juegos que ya tienen forwarder aparecen sin marcar.
+- Cada juego toma sus imagenes de logos\, covers\ e icons\, y lo que falte
+  del primer resultado de SteamGridDB; el fondo, si no hay, de libretro.
+  Usa el banner transparente y el sonido elegidos en la ventana principal.
+- Doble clic en un juego lo abre en la ventana principal para ajustarlo.
+- Los CIAs quedan en <SD>\cias\.
+
+JUEGOS DE CARTUCHO (GB, GBC, GBA, NES, SNES, ATARI 2600...)
+- Al elegir un juego, el core se elige solo segun la extension:
+  .gb/.gbc gambatte, .gba gpsp, .nes nestopia, .sfc/.smc snes9x2005_plus,
+  .a26 stella2014 (si no esta, el siguiente que haya en la SD).
+- Los .zip se miran por dentro: un .zip con un .nes va a nestopia.
+- Los .bin y .7z no dicen de que sistema son: usan el core elegido en la
+  lista "Core". Revisalo antes de crear el CIA.
+- En "Varios juegos..." cada juego lleva su core (columna "Core"), asi
+  que una carpeta puede mezclar sistemas.
+- El core tiene que estar en la SD como .3dsx (de RetroArch_3dsx.7z, la
+  misma version que tu RetroArch). Los .cia de la version CIA no sirven.
+
 TITLE ID
 - El programa revisa los titulos instalados en la SD y el registro
-  sdmc:/forwarders/registry.txt (el mismo que usa fwdgen.3dsx).
+  sdmc:/forwarders/registry.txt, que se guarda en la SD.
 - Nunca usa el ID de otro titulo instalado (por ejemplo tus forwarders
   de DS): si esta ocupado, toma el siguiente libre y te lo dice.
 - Si vuelves a crear el CIA de un juego, conserva su ID y sube la version,

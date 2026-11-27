@@ -1,21 +1,19 @@
-// fwdgen-pc: the PC side of RetroArch Forwarder Generator.
-//
-// Builds the same CIA as the console app, from the same template and the same
-// patching code, with the artwork prepared on the PC. A GUI drives it.
+// fwdgen-pc: writes the forwarder CIA from the template, with the artwork
+// prepared on the PC. RetroArchForwarderPC.ps1 drives it.
 //
 //   fwdgen-pc tid   --sd E:\ --rom "sdmc:/roms/psx/Game.chd"
 //   fwdgen-pc build --sd E:\ --template template.cia --rom ... --core ...
 //                   --name "Game" [--publisher ...] --tid 000400000FF1C100
 //                   --icon icon.png --banner banner.png [--transparent]
+//                   [--sound jingle.wav]
 //                   --out Game.cia
 //
 // The SD card is read for two things: the titles installed on it (the
-// folder names under "Nintendo 3DS\...\title\00040000") and the registry the
-// console app keeps in sdmc:/forwarders/registry.txt. The same rules apply as
-// on the console: a game keeps its id, and an id held by another title is
-// never reused. The one thing the PC cannot do is read a title's product
-// code (the SD copy is encrypted), so an installed title the registry does
-// not attribute to this ROM always counts as someone else's.
+// folder names under "Nintendo 3DS\...\title\00040000") and the registry
+// sdmc:/forwarders/registry.txt. A game keeps its id, and an id held by
+// another title is never reused. The PC cannot read a title's product code
+// (the SD copy is encrypted), so an installed title the registry does not
+// attribute to this ROM always counts as someone else's.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -35,6 +33,7 @@
 #include "../source/bannergen.h"
 #include "../source/icongen.h"
 #include "../source/idalloc.h"
+#include "../source/cwav.h"
 
 #define MAX_INSTALLED 4096
 
@@ -212,9 +211,9 @@ static bool idTaken(uint64_t tid, void* ctx)
 // ---------------------------------------------------------------- versions
 
 // The HOME menu only refreshes a cached icon when the title version changes.
-// The console reads the installed version; the PC cannot, so it keeps its
-// own count in sdmc:/forwarders/versions.txt, starting well above what the
-// console hands out.
+// The installed version cannot be read from the PC (the SD copy is
+// encrypted), so a count is kept in sdmc:/forwarders/versions.txt, starting
+// at 2048.
 static unsigned nextVersion(const char* sd, uint64_t tid)
 {
 	char path[1024], want[20];
@@ -330,6 +329,7 @@ static int cmdBuild(int argc, char** argv)
 	const char* icon = arg(argc, argv, "--icon");
 	const char* banner = arg(argc, argv, "--banner");
 	const char* out = arg(argc, argv, "--out");
+	const char* sound = arg(argc, argv, "--sound");
 	uint8_t* data;
 	size_t len;
 	cia_t cia;
@@ -382,9 +382,35 @@ static int cmdBuild(int argc, char** argv)
 		uint8_t* bnr = cia_banner_data(&cia, &reserved);
 		uint8_t* rebuilt = bnr ? malloc(reserved) : NULL;
 		size_t n = !rebuilt ? 0
-			: flag(argc, argv, "--transparent") ? bannerReplaceImageAlpha(bnr, reserved, banner, rebuilt, reserved)
-			: bannerReplaceImage(bnr, reserved, banner, rebuilt, reserved);
+			: flag(argc, argv, "--transparent") ? bannerReplaceImageAlpha(bnr, cia_banner_size(&cia), banner, rebuilt, reserved)
+			: bannerReplaceImage(bnr, cia_banner_size(&cia), banner, rebuilt, reserved);
 		if (!n || cia_set_banner(&cia, rebuilt, n) != CIA_OK) { free(rebuilt); printf("ERROR=banner image unreadable\n"); return 3; }
+		free(rebuilt);
+	}
+	if (sound)
+	{
+		size_t wlen = 0, clen, reserved = 0, n;
+		uint8_t* wav = readAll(sound, &wlen);
+		uint8_t *cw = NULL, *bnr, *rebuilt;
+		const char* why = "file not found";
+
+		if (!wav || !(clen = cwavFromWav(wav, wlen, &cw, &why)))
+		{
+			free(wav);
+			printf("ERROR=sound: %s\n", why);
+			return 3;
+		}
+		free(wav);
+		bnr = cia_banner_data(&cia, &reserved);
+		rebuilt = bnr ? malloc(reserved) : NULL;
+		n = rebuilt ? bannerSetSound(bnr, cia_banner_size(&cia), cw, clen, rebuilt, reserved) : 0;
+		free(cw);
+		if (!n || cia_set_banner(&cia, rebuilt, n) != CIA_OK)
+		{
+			free(rebuilt);
+			printf("ERROR=sound too long for the banner (%lu KB free)\n", (unsigned long)(reserved / 1024));
+			return 3;
+		}
 		free(rebuilt);
 	}
 
@@ -399,7 +425,7 @@ static int cmdBuild(int argc, char** argv)
 	fclose(f);
 	free(data);
 
-	// Reserve the id for this game, the way the console does after installing.
+	// Reserve the id for this game before it is even installed.
 	{
 		char line[1200];
 		if (!(idRegistryFind(s_registry, rom, &known) && known == tid))
