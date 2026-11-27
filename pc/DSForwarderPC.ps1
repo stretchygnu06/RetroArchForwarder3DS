@@ -54,12 +54,12 @@ if (-not ('FwdArt' -as [type])) {
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Transparent = $true; CoverBanner = $false; Sound = ''; YanbfDir = ''; LastRomDir = ''; LastBatchDir = '' }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Transparent = $true; CoverBanner = $false; Sound = ''; YanbfDir = ''; LastRomDir = ''; LastBatchDir = ''; OutDir = '' }
 $script:FirstRun = -not (Test-Path -LiteralPath $script:Settings)
 if (-not $script:FirstRun) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
-        foreach ($k in @('ApiKey', 'Sd', 'Sound', 'YanbfDir', 'LastRomDir', 'LastBatchDir')) { if ($j.$k) { $script:Cfg[$k] = [string]$j.$k } }
+        foreach ($k in @('ApiKey', 'Sd', 'Sound', 'YanbfDir', 'LastRomDir', 'LastBatchDir', 'OutDir')) { if ($j.$k) { $script:Cfg[$k] = [string]$j.$k } }
         foreach ($k in @('AutoPick', 'Transparent', 'CoverBanner')) { if ($null -ne $j.$k) { $script:Cfg[$k] = [bool]$j.$k } }
     } catch {}
 }
@@ -71,6 +71,7 @@ if (-not $script:Cfg.ApiKey) {
             $rj = Get-Content -LiteralPath $ra -Raw | ConvertFrom-Json
             if ($rj.ApiKey) { $script:Cfg.ApiKey = [string]$rj.ApiKey }
             if ($rj.Sd -and -not $script:Cfg.Sd) { $script:Cfg.Sd = [string]$rj.Sd }
+            if ($rj.OutDir -and -not $script:Cfg.OutDir) { $script:Cfg.OutDir = [string]$rj.OutDir }
         }
     } catch {}
 }
@@ -486,7 +487,7 @@ function Invoke-DsBuild([string]$romFile, [string]$name, [string]$publisher, [st
 # ---------------------------------------------------------------- GUI
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $script:AppName
-$form.ClientSize = New-Object System.Drawing.Size(900, 666)
+$form.ClientSize = New-Object System.Drawing.Size(900, 716)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -586,15 +587,33 @@ $tip.SetToolTip($btnSound, 'Sonido al seleccionar el icono en el menu HOME (WAV 
 $tip.SetToolTip($btnSoundDs, 'El sonido de arranque del DS (dsboot.wav de YANBF).')
 $tip.SetToolTip($btnSoundNone, 'Sin sonido.')
 
-$btnBuild = New-Button 'Crear CIA' 12 502 383 70
+[void](New-Label 'Salida:' 12 502 50)
+$lblOut = New-Label '' 64 502 254
+$lblOut.AutoEllipsis = $true
+$btnOut = New-Button 'Cambiar...' 322 500 76 26
+$tip.SetToolTip($btnOut, 'Carpeta donde se guardan los CIAs. Se recuerda (por defecto <SD>\cias).')
+
+# The list of "Revisar uno por uno": hidden until it is in use.
+$btnQPrev = New-Button '<' 12 530 30 27
+$lblQueue = New-Label '' 46 532 152
+$btnQNext = New-Button '>' 200 530 30 27
+$btnQRest = New-Button 'Crear el resto (auto)' 234 530 134 27
+$btnQEnd  = New-Button 'X' 370 530 28 27
+$tip.SetToolTip($btnQPrev, 'Juego anterior de la lista (lo que elegiste se conserva).')
+$tip.SetToolTip($btnQNext, 'Siguiente juego sin crear su CIA.')
+$tip.SetToolTip($btnQRest, 'Crea los CIAs que faltan de la lista: los que ya revisaste con lo que elegiste, los demas con la eleccion automatica.')
+$tip.SetToolTip($btnQEnd, 'Salir de la lista.')
+foreach ($c in @($btnQPrev, $lblQueue, $btnQNext, $btnQRest, $btnQEnd)) { $c.Visible = $false }
+
+$btnBuild = New-Button 'Crear CIA' 12 564 383 62
 $btnBuild.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
-$progress = Add-Ctl (New-Object System.Windows.Forms.ProgressBar) 12 586 383 18
+$progress = Add-Ctl (New-Object System.Windows.Forms.ProgressBar) 12 632 383 18
 $progress.Maximum = 4
-$lblStatus = New-Label 'Listo.' 12 606 383
+$lblStatus = New-Label 'Listo.' 12 652 383
 $lblStatus.Height = 46; $lblStatus.TextAlign = 'TopLeft'
 
 # --- right column: SteamGridDB
-$grp = Add-Ctl (New-Object System.Windows.Forms.GroupBox) 410 6 478 652
+$grp = Add-Ctl (New-Object System.Windows.Forms.GroupBox) 410 6 478 702
 $grp.Text = 'SteamGridDB'
 function Add-G($ctl, [int]$x, [int]$y, [int]$w, [int]$h) {
     $ctl.Location = New-Object System.Drawing.Point($x, $y)
@@ -622,7 +641,7 @@ $chkAuto = Add-G (New-Object System.Windows.Forms.CheckBox) 10 132 458 22
 $chkAuto.Text = 'Elegir automaticamente el primer logo y fondo al elegir juego'
 $chkAuto.Checked = $script:Cfg.AutoPick
 
-$tabs = Add-G (New-Object System.Windows.Forms.TabControl) 10 160 458 482
+$tabs = Add-G (New-Object System.Windows.Forms.TabControl) 10 160 458 532
 function New-Tab([string]$title) {
     $tp = New-Object System.Windows.Forms.TabPage
     $tp.Text = $title
@@ -644,6 +663,30 @@ function Set-Status([string]$t, [int]$step = -1) {
 }
 
 function Get-SdRoot { if ($cmbSd.SelectedItem) { return [string]$cmbSd.SelectedItem }; return $null }   # "E:"
+
+# The output folder. One on the SD card is kept as "SD:\cias", so it follows
+# the card when Windows gives it another letter. <SD>\cias by default.
+function Get-OutDir {
+    $sd = Get-SdRoot
+    $o = $script:Cfg.OutDir
+    if ($o -and $o.StartsWith('SD:')) { if ($sd) { return $sd + $o.Substring(3) }; return $null }
+    if ($o -and (Test-Path -LiteralPath $o -PathType Container)) { return $o }
+    if ($sd) { return "$sd\cias" }
+    return $null
+}
+function Update-OutDir {
+    $d = Get-OutDir
+    $lblOut.Text = $(if ($d) { $d } else { '(conecta la SD)' })
+    $tip.SetToolTip($lblOut, $lblOut.Text)
+}
+function Get-OutFile([string]$name) {
+    $dir = Get-OutDir
+    if (-not $dir) { throw 'No hay carpeta de salida: conecta la SD o elige una con "Cambiar...".' }
+    if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir) }
+    $file = ($name -replace '[\\/:*?"<>|]', '').Trim()
+    if (-not $file) { $file = 'forwarder' }
+    return (Join-Path $dir ($file + '.cia'))
+}
 
 function Refresh-Sd {
     $prev = Get-SdRoot
@@ -829,6 +872,7 @@ $chkCoverBanner.Add_CheckedChanged({
 $btnSdRefresh.Add_Click({ Refresh-Sd })
 $cmbSd.Add_SelectedIndexChanged({
     $script:Cfg.Sd = Get-SdRoot; Save-Settings
+    Update-OutDir
     $script:Installed = $null
     $lblSd.Text = 'SD de 3DS'; $lblSd.ForeColor = [System.Drawing.Color]::Green
     if ($script:Rom -and -not $script:Rom.StartsWith((Get-SdRoot) + '\', [StringComparison]::OrdinalIgnoreCase)) {
@@ -936,6 +980,7 @@ function Load-Game([string]$file) {
 }
 
 $btnRom.Add_Click({
+    Stop-Queue
     $sd = Get-SdRoot
     if (-not $sd) { Show-Error 'Primero conecta la SD de tu 3DS y dale a Actualizar.'; return }
     $d = New-Object System.Windows.Forms.OpenFileDialog
@@ -948,29 +993,27 @@ $btnRom.Add_Click({
 })
 
 $btnBuild.Add_Click({
-    $sd = Get-SdRoot
     if (-not $script:Rom) { [void][System.Windows.Forms.MessageBox]::Show('Primero elige un juego de la SD.'); return }
     if (-not $script:Ids) { Show-Error 'Falta la carpeta de YANBF: dale a "Carpeta..." y elige su carpeta generator.'; return }
     $name = ($txtName.Text -replace '"', '').Trim()
     if (-not $name) { Show-Error 'Escribe un nombre para el juego.'; return }
 
-    $ciaDir = "$sd\cias"
-    if (-not (Test-Path -LiteralPath $ciaDir)) { [void](New-Item -ItemType Directory -Path $ciaDir) }
-    $d = New-Object System.Windows.Forms.SaveFileDialog
-    $d.Filter = 'Archivos CIA (*.cia)|*.cia'
-    $d.FileName = ((Get-CleanName $script:GameName) -replace '[\\/:*?"<>|]', '') + '.cia'
-    $d.InitialDirectory = $ciaDir
-    if ($d.ShowDialog() -ne 'OK') { return }
-
     $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
     $btnBuild.Enabled = $false
+    $next = $false
     try {
+        $out = Get-OutFile (Get-CleanName $script:GameName)
         Set-Status 'Creando banner, icono y CIA...' 2
-        $r = Invoke-DsBuild $script:Rom $name $txtPub.Text $script:Bg $script:Logo ([bool]$chkTrans.Checked) $script:Cover ([bool]$chkCoverBanner.Checked) $d.FileName
+        $r = Invoke-DsBuild $script:Rom $name $txtPub.Text $script:Bg $script:Logo ([bool]$chkTrans.Checked) $script:Cover ([bool]$chkCoverBanner.Checked) $out
         $script:Installed = $null
         Update-Tid
-        Set-Status ("CIA creado: {0}  (Title ID {1}, version {2})" -f [IO.Path]::GetFileName($d.FileName), $r.Tid, $r.Version) 4
-        [void][System.Windows.Forms.MessageBox]::Show("CIA creado:`n$($d.FileName)`n`nInstalalo en la 3DS con FBI (SD > cias). Si el juego ya tenia forwarder, se instala encima.", 'Listo')
+        Set-Status ("CIA creado: {0}  (Title ID {1}, version {2})" -f $out, $r.Tid, $r.Version) 4
+        if (In-Queue) {
+            $script:Queue[$script:QIndex].Built = $true
+            $next = $true
+        } else {
+            [void][System.Windows.Forms.MessageBox]::Show("CIA creado:`n$out`n`nInstalalo en la 3DS con FBI. Si el juego ya tenia forwarder, se instala encima.", 'Listo')
+        }
     } catch {
         Write-Log "ERROR: $($_.Exception.Message)"
         Set-Status 'Error.' 0
@@ -979,6 +1022,168 @@ $btnBuild.Add_Click({
         $btnBuild.Enabled = $true
         $form.Cursor = [System.Windows.Forms.Cursors]::Default
     }
+    if ($next) {
+        $n = Find-NextPending $script:QIndex
+        if ($n -ge 0) { Show-QueueItem $n }
+        else {
+            Update-QueueUi
+            [void][System.Windows.Forms.MessageBox]::Show("Listo: ya estan todos los CIAs de la lista en`n$(Get-OutDir)`n`nInstalalos en la 3DS con FBI.", 'Lista terminada')
+        }
+    }
+})
+
+# ---------------------------------------------------------------- one by one
+# "Revisar uno por uno": the games of the list open here one after another,
+# each with its pictures picked automatically, for any change before its CIA.
+# What was chosen for a game is kept when moving back and forth.
+$script:Queue = @(); $script:QIndex = -1
+
+function In-Queue { return [bool](@($script:Queue).Count -gt 0 -and $script:QIndex -ge 0) }
+
+function Save-Picks {
+    if (-not (In-Queue)) { return }
+    $script:Queue[$script:QIndex].Picks = @{
+        Logo = $script:Logo; Bg = $script:Bg; LogoIsLocal = $script:LogoIsLocal; BgIsLocal = $script:BgIsLocal
+        Name = $txtName.Text; Pub = $txtPub.Text
+    }
+}
+
+function Restore-Picks($p) {
+    $script:Logo = $p.Logo; $script:Bg = $p.Bg
+    $script:LogoIsLocal = $p.LogoIsLocal; $script:BgIsLocal = $p.BgIsLocal
+    $txtName.Text = $p.Name; $txtPub.Text = $p.Pub
+    Update-Preview
+}
+
+function Update-QueueUi {
+    $on = In-Queue
+    foreach ($c in @($btnQPrev, $lblQueue, $btnQNext, $btnQRest, $btnQEnd)) { $c.Visible = $on }
+    if (-not $on) { $btnBuild.Text = 'Crear CIA'; return }
+    $n = @($script:Queue).Count
+    $done = @($script:Queue | Where-Object { $_.Built }).Count
+    $lblQueue.Text = "Juego $($script:QIndex + 1) de $n ($done hechos)"
+    $btnQPrev.Enabled = $script:QIndex -gt 0
+    $btnQNext.Enabled = $script:QIndex -lt $n - 1
+    $btnQRest.Enabled = $done -lt $n
+    $btnBuild.Text = $(if ($script:Queue[$script:QIndex].Built) { 'Crear CIA otra vez' } elseif ((Find-NextPending $script:QIndex) -ge 0) { 'Crear CIA y siguiente' } else { 'Crear CIA' })
+}
+
+# The next game of the list without a CIA after $from, then from the start.
+function Find-NextPending([int]$from) {
+    $n = @($script:Queue).Count
+    for ($k = 1; $k -lt $n; $k++) {
+        $i = ($from + $k) % $n
+        if (-not $script:Queue[$i].Built) { return $i }
+    }
+    return -1
+}
+
+function Show-QueueItem([int]$i) {
+    Save-Picks
+    $script:QIndex = $i
+    $q = $script:Queue[$i]
+    Load-Game $q.File
+    if ($q.Picks) { Restore-Picks $q.Picks }
+    Update-QueueUi
+}
+
+function Stop-Queue {
+    $script:Queue = @(); $script:QIndex = -1
+    Update-QueueUi
+}
+
+# Pictures picked automatically for one game, as the batch does: local files
+# (logos\, covers\, YANBF's banners\), the libretro cover, the first
+# SteamGridDB results, the libretro title screen.
+function Get-AutoArt([string]$file, [bool]$useSgdb) {
+    $stem = [IO.Path]::GetFileNameWithoutExtension($file)
+    $clean = Get-CleanName $stem
+    $a = Find-LocalArt $stem
+    $o = @{ Logo = $a.Logo; Bg = $a.Bg; Cover = $null; Src = @($a.Src) }
+    if ($chkCoverBanner.Checked) {
+        $o.Cover = Get-LibretroArt 'Named_Boxarts' $stem
+        $o.Src += $(if ($o.Cover) { 'portada libretro' } else { 'sin portada libretro' })
+    }
+    if ($useSgdb -and (-not $o.Logo -or -not $o.Bg)) {
+        try {
+            $g = Get-SgdbAuto $clean
+            if ($g) {
+                if (-not $o.Logo) { $o.Logo = $g.Logo }; if (-not $o.Bg) { $o.Bg = $g.Bg }
+                $o.Src += "SGDB: $($g.Name)"
+            }
+        } catch { $o.Src += 'SGDB no respondio'; Write-Log "SGDB ${clean}: $($_.Exception.Message)" }
+    }
+    if (-not $o.Bg) {
+        $o.Bg = Get-LibretroArt 'Named_Titles' $stem
+        if ($o.Bg) { $o.Src += 'fondo libretro' }
+    }
+    return $o
+}
+
+# "Crear el resto (auto)": every game of the list still without a CIA. Those
+# already looked at keep what was chosen; the others take the automatic pick.
+function Invoke-QueueRest {
+    Save-Picks
+    $todo = @(0..(@($script:Queue).Count - 1) | Where-Object { -not $script:Queue[$_].Built })
+    if (-not $todo.Count) { return }
+    $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+    foreach ($c in @($btnQPrev, $btnQNext, $btnQRest, $btnQEnd, $btnBuild, $btnRom, $btnBatch)) { $c.Enabled = $false }
+    $ok = 0; $bad = 0; $k = 0
+    try {
+        foreach ($i in $todo) {
+            $k++
+            $q = $script:Queue[$i]
+            $stem = [IO.Path]::GetFileNameWithoutExtension($q.File)
+            Set-Status ("Creando {0} de {1}: {2}" -f $k, $todo.Count, $stem)
+            try {
+                $out = Get-OutFile (Get-CleanName $stem)
+                if ($q.Picks) {
+                    $p = $q.Picks
+                    $cover = $(if ($chkCoverBanner.Checked) { Get-LibretroArt 'Named_Boxarts' $stem } else { $null })
+                    $name = ($p.Name -replace '"', '').Trim(); if (-not $name) { $name = Get-CleanName $stem }
+                    $r = Invoke-DsBuild $q.File $name $p.Pub $p.Bg $p.Logo ([bool]$chkTrans.Checked) $cover ([bool]$chkCoverBanner.Checked) $out
+                } else {
+                    $info = Invoke-Cli ("ndsinfo --rom {0}" -f (Q $q.File))
+                    if ($info.ERROR) { throw $info.ERROR }
+                    $name = $(if ($info.TITLE) { $info.TITLE } else { Get-CleanName $stem })
+                    $a = Get-AutoArt $q.File ([bool]$txtKey.Text.Trim())
+                    $r = Invoke-DsBuild $q.File $name $txtPub.Text $a.Bg $a.Logo ([bool]$chkTrans.Checked) $a.Cover ([bool]$chkCoverBanner.Checked) $out
+                }
+                $q.Built = $true
+                $ok++
+            } catch {
+                Write-Log "LISTA ERROR $($q.File): $($_.Exception.Message)"
+                $bad++
+            }
+            Update-QueueUi
+        }
+    } finally {
+        foreach ($c in @($btnQPrev, $btnQNext, $btnQRest, $btnQEnd, $btnBuild, $btnRom, $btnBatch)) { $c.Enabled = $true }
+        $form.Cursor = [System.Windows.Forms.Cursors]::Default
+        $script:Installed = $null
+        Update-QueueUi
+        Update-Tid
+    }
+    Set-Status "Lista: $ok CIAs creados$(if ($bad) { ", $bad con error (detalle en log-ds.txt)" })."
+    [void][System.Windows.Forms.MessageBox]::Show("$ok CIAs creados en`n$(Get-OutDir)$(if ($bad) { "`n$bad con error (detalle en log-ds.txt)" })", 'Lista')
+}
+
+$btnQPrev.Add_Click({ if ($script:QIndex -gt 0) { Show-QueueItem ($script:QIndex - 1) } })
+$btnQNext.Add_Click({ if ($script:QIndex -lt @($script:Queue).Count - 1) { Show-QueueItem ($script:QIndex + 1) } })
+$btnQRest.Add_Click({ Invoke-QueueRest })
+$btnQEnd.Add_Click({ Stop-Queue; Set-Status 'Lista cerrada.' })
+$btnOut.Add_Click({
+    $sd = Get-SdRoot
+    $d = New-Object System.Windows.Forms.FolderBrowserDialog
+    $d.Description = 'Carpeta donde guardar los CIAs'
+    $cur = Get-OutDir
+    if ($cur -and (Test-Path -LiteralPath $cur)) { $d.SelectedPath = $cur } elseif ($sd) { $d.SelectedPath = "$sd\" }
+    if ($d.ShowDialog() -ne 'OK') { return }
+    $dir = $d.SelectedPath.TrimEnd('\')
+    if ($sd -and ($dir + '\').StartsWith("$sd\", [StringComparison]::OrdinalIgnoreCase)) { $script:Cfg.OutDir = 'SD:' + $dir.Substring($sd.Length) }
+    else { $script:Cfg.OutDir = $dir }
+    Save-Settings
+    Update-OutDir
 })
 
 # ---------------------------------------------------------------- batch
@@ -1031,11 +1236,13 @@ function Show-Batch {
     $bs = BAdd (New-Object System.Windows.Forms.Label) 12 508 736 20; $bs.Text = 'Elige una carpeta de la SD.'
     $btnAll  = BAdd (New-Object System.Windows.Forms.Button) 12 532 80 28;  $btnAll.Text = 'Marcar todos'
     $btnNone = BAdd (New-Object System.Windows.Forms.Button) 96 532 80 28;  $btnNone.Text = 'Ninguno'
+    $btnReview = BAdd (New-Object System.Windows.Forms.Button) 330 528 184 34; $btnReview.Text = 'Revisar uno por uno'
+    $tip.SetToolTip($btnReview, 'Abre los juegos marcados uno tras otro en la ventana principal, con las imagenes ya elegidas, para cambiar lo que quieras antes de crear cada CIA.')
     $btnGo   = BAdd (New-Object System.Windows.Forms.Button) 520 528 124 34; $btnGo.Text = 'Crear CIAs'
     $btnGo.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
     $btnX    = BAdd (New-Object System.Windows.Forms.Button) 650 528 98 34;  $btnX.Text = 'Cerrar'
 
-    $state = @{ Running = $false; Stop = $false; Load = $null }
+    $state = @{ Running = $false; Stop = $false; Load = $null; Queue = $null }
 
     $scan = {
         $lv.Items.Clear()
@@ -1083,16 +1290,24 @@ function Show-Batch {
         $state.Load = [string]$lv.SelectedItems[0].Tag
         $bf.Close()
     })
+    $btnReview.Add_Click({
+        $items = @($lv.CheckedItems)
+        if (-not $items.Count) { Show-Error 'Marca al menos un juego.'; return }
+        $list = @()
+        foreach ($it in $items) { $list += @{ File = [string]$it.Tag; Built = $false; Picks = $null } }
+        $state.Queue = $list
+        $bf.Close()
+    })
     $btnX.Add_Click({ if ($state.Running) { $state.Stop = $true; $btnX.Enabled = $false; $bs.Text = 'Deteniendo despues del juego actual...' } else { $bf.Close() } })
     $bf.Add_FormClosing({ param($s, $e) if ($state.Running) { $state.Stop = $true; $e.Cancel = $true } })
 
     $btnGo.Add_Click({
         $items = @($lv.CheckedItems)
         if (-not $items.Count) { Show-Error 'Marca al menos un juego.'; return }
-        $ciaDir = "$sd\cias"
-        if (-not (Test-Path -LiteralPath $ciaDir)) { [void](New-Item -ItemType Directory -Path $ciaDir) }
+        $ciaDir = Get-OutDir
+        if (-not $ciaDir) { Show-Error 'No hay carpeta de salida.'; return }
         $state.Running = $true; $state.Stop = $false
-        foreach ($c in @($btnGo, $btnDir, $chkRec, $chkSkip, $chkSg, $btnAll, $btnNone)) { $c.Enabled = $false }
+        foreach ($c in @($btnGo, $btnReview, $btnDir, $chkRec, $chkSkip, $chkSg, $btnAll, $btnNone)) { $c.Enabled = $false }
         $btnX.Text = 'Detener'
         $bp.Maximum = $items.Count; $bp.Value = 0
         $ok = 0; $bad = 0
@@ -1109,30 +1324,12 @@ function Show-Batch {
                 if ($info.ERROR) { throw $info.ERROR }
                 $name = $(if ($info.TITLE) { $info.TITLE } else { $clean })
 
-                $a = Find-LocalArt $stem
-                $logo = $a.Logo; $bg = $a.Bg; $src = @($a.Src)
-                $cover = $null
-                if ($chkCoverBanner.Checked) {
-                    $cover = Get-LibretroArt 'Named_Boxarts' $stem
-                    $src += $(if ($cover) { 'portada libretro' } else { 'sin portada libretro' })
-                }
-                if ($chkSg.Checked -and (-not $logo -or -not $bg)) {
-                    $it.SubItems[3].Text = 'SteamGridDB...'; [System.Windows.Forms.Application]::DoEvents()
-                    try {
-                        $g = Get-SgdbAuto $clean
-                        if ($g) {
-                            if (-not $logo) { $logo = $g.Logo }; if (-not $bg) { $bg = $g.Bg }
-                            $src += "SGDB: $($g.Name)"
-                        }
-                    } catch { $src += 'SGDB no respondio'; Write-Log "SGDB ${clean}: $($_.Exception.Message)" }
-                }
-                if (-not $bg) {
-                    $bg = Get-LibretroArt 'Named_Titles' $stem
-                    if ($bg) { $src += 'fondo libretro' }
-                }
+                $it.SubItems[3].Text = 'Buscando imagenes...'; [System.Windows.Forms.Application]::DoEvents()
+                $a = Get-AutoArt $file ([bool]$chkSg.Checked)
+                $logo = $a.Logo; $bg = $a.Bg; $cover = $a.Cover; $src = @($a.Src)
 
                 $it.SubItems[3].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
-                $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
+                $out = Get-OutFile $clean
                 $r = Invoke-DsBuild $file $name $txtPub.Text $bg $logo ([bool]$chkTrans.Checked) $cover ([bool]$chkCoverBanner.Checked) $out
                 $it.SubItems[3].Text = "Listo, v$($r.Version)" + $(if ($r.Status -eq 'update') { ' (reemplaza)' } elseif ($r.Status -eq 'new') { ' (nuevo)' } else { '' })
                 $it.ForeColor = [System.Drawing.Color]::DarkGreen
@@ -1150,7 +1347,7 @@ function Show-Batch {
             [System.Windows.Forms.Application]::DoEvents()
         }
         $state.Running = $false
-        foreach ($c in @($btnGo, $btnDir, $chkRec, $chkSkip, $btnAll, $btnNone)) { $c.Enabled = $true }
+        foreach ($c in @($btnGo, $btnReview, $btnDir, $chkRec, $chkSkip, $btnAll, $btnNone)) { $c.Enabled = $true }
         $chkSg.Enabled = [bool]$txtKey.Text.Trim()
         $btnX.Text = 'Cerrar'; $btnX.Enabled = $true
         $bs.Text = "Terminado: $ok CIAs en $ciaDir" + $(if ($bad) { ", $bad con error (detalle en log-ds.txt)" } else { '' }) + '. Instalalos con FBI.'
@@ -1161,7 +1358,10 @@ function Show-Batch {
     # Modal: the handlers above see this function's variables only while it runs.
     [void]$bf.ShowDialog($form)
     $bf.Dispose()
-    if ($state.Load) { Load-Game $state.Load }
+    if ($state.Queue) {
+        $script:Queue = @($state.Queue); $script:QIndex = -1
+        Show-QueueItem 0
+    } elseif ($state.Load) { Stop-Queue; Load-Game $state.Load }
 }
 
 $btnBatch.Add_Click({ Show-Batch })
@@ -1170,6 +1370,7 @@ $btnBatch.Add_Click({ Show-Batch })
 Save-Settings
 Update-Yanbf
 Refresh-Sd
+Update-OutDir
 Update-Sound
 Update-Preview
 try { [void]$form.ShowDialog() }
