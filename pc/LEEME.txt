@@ -45,6 +45,18 @@ VARIOS JUEGOS A LA VEZ
 - Doble clic en un juego lo abre en la ventana principal para ajustarlo.
 - Los CIAs quedan en <SD>\cias\.
 
+JUEGOS DE CARTUCHO (GB, GBC, GBA, NES, SNES, ATARI 2600...)
+- Al elegir un juego, el core se elige solo segun la extension:
+  .gb/.gbc gambatte, .gba gpsp, .nes nestopia, .sfc/.smc snes9x2005_plus,
+  .a26 stella2014 (si no esta, el siguiente que haya en la SD).
+- Los .zip se miran por dentro: un .zip con un .nes va a nestopia.
+- Los .bin y .7z no dicen de que sistema son: usan el core elegido en la
+  lista "Core". Revisalo antes de crear el CIA.
+- En "Varios juegos..." cada juego lleva su core (columna "Core"), asi
+  que una carpeta puede mezclar sistemas.
+- El core tiene que estar en la SD como .3dsx (de RetroArch_3dsx.7z, la
+  misma version que tu RetroArch). Los .cia de la version CIA no sirven.
+
 TITLE ID
 - El programa revisa los titulos instalados en la SD y el registro
   sdmc:/forwarders/registry.txt (el mismo que usa fwdgen.3dsx).

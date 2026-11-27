@@ -382,25 +382,100 @@ $script:Systems = [ordered]@{
     'snes9x2005' = 'Nintendo - Super Nintendo Entertainment System'; 'snes9x2005_plus' = 'Nintendo - Super Nintendo Entertainment System'
     'snes9x2010' = 'Nintendo - Super Nintendo Entertainment System'
     'nestopia' = 'Nintendo - Nintendo Entertainment System'; 'fceumm' = 'Nintendo - Nintendo Entertainment System'; 'quicknes' = 'Nintendo - Nintendo Entertainment System'
-    'gambatte' = 'Nintendo - Game Boy Color'; 'gpsp' = 'Nintendo - Game Boy Advance'; 'mgba' = 'Nintendo - Game Boy Advance'; 'vba_next' = 'Nintendo - Game Boy Advance'
+    'gambatte' = 'Nintendo - Game Boy Color'; 'gearboy' = 'Nintendo - Game Boy Color'; 'tgbdual' = 'Nintendo - Game Boy Color'
+    'gpsp' = 'Nintendo - Game Boy Advance'; 'mgba' = 'Nintendo - Game Boy Advance'; 'vba_next' = 'Nintendo - Game Boy Advance'
+    'stella2014' = 'Atari - 2600'; 'stella' = 'Atari - 2600'
     'genesis_plus_gx' = 'Sega - Mega Drive - Genesis'; 'picodrive' = 'Sega - Mega Drive - Genesis'
     'mednafen_pce_fast' = 'NEC - PC Engine - TurboGrafx 16'; 'mednafen_ngp' = 'SNK - Neo Geo Pocket Color'; 'mednafen_wswan' = 'Bandai - WonderSwan Color'
 }
+
+# What a file extension says about the system, and the cores that run it on a
+# 3DS, best first. Used to pick the core of each game and the libretro
+# thumbnail folder (the extension beats the core: gambatte runs .gb and .gbc).
+$script:ExtSystems = [ordered]@{
+    '.gb'  = @{ System = 'Nintendo - Game Boy';            Cores = @('gambatte', 'gearboy', 'tgbdual', 'mgba') }
+    '.gbc' = @{ System = 'Nintendo - Game Boy Color';      Cores = @('gambatte', 'gearboy', 'tgbdual', 'mgba') }
+    '.gba' = @{ System = 'Nintendo - Game Boy Advance';    Cores = @('gpsp', 'mgba', 'vba_next') }
+    '.nes' = @{ System = 'Nintendo - Nintendo Entertainment System'; Cores = @('nestopia', 'fceumm', 'quicknes') }
+    '.fds' = @{ System = 'Nintendo - Family Computer Disk System';  Cores = @('nestopia', 'fceumm') }
+    '.unf' = @{ System = 'Nintendo - Nintendo Entertainment System'; Cores = @('fceumm', 'nestopia') }
+    '.sfc' = @{ System = 'Nintendo - Super Nintendo Entertainment System'; Cores = @('snes9x2005_plus', 'snes9x2005', 'snes9x2002', 'snes9x2010', 'snes9x') }
+    '.smc' = @{ System = 'Nintendo - Super Nintendo Entertainment System'; Cores = @('snes9x2005_plus', 'snes9x2005', 'snes9x2002', 'snes9x2010', 'snes9x') }
+    '.a26' = @{ System = 'Atari - 2600';                   Cores = @('stella2014', 'stella') }
+    '.md'  = @{ System = 'Sega - Mega Drive - Genesis';    Cores = @('picodrive', 'genesis_plus_gx') }
+    '.gen' = @{ System = 'Sega - Mega Drive - Genesis';    Cores = @('picodrive', 'genesis_plus_gx') }
+    '.smd' = @{ System = 'Sega - Mega Drive - Genesis';    Cores = @('picodrive', 'genesis_plus_gx') }
+    '.32x' = @{ System = 'Sega - 32X';                     Cores = @('picodrive') }
+    '.sms' = @{ System = 'Sega - Master System - Mark III'; Cores = @('picodrive', 'genesis_plus_gx', 'smsplus', 'gearsystem') }
+    '.gg'  = @{ System = 'Sega - Game Gear';               Cores = @('genesis_plus_gx', 'gearsystem', 'smsplus', 'picodrive') }
+    '.pce' = @{ System = 'NEC - PC Engine - TurboGrafx 16'; Cores = @('mednafen_pce_fast', 'geargrafx') }
+    '.ngp' = @{ System = 'SNK - Neo Geo Pocket';           Cores = @('mednafen_ngp', 'race') }
+    '.ngc' = @{ System = 'SNK - Neo Geo Pocket Color';     Cores = @('mednafen_ngp', 'race') }
+    '.ws'  = @{ System = 'Bandai - WonderSwan';            Cores = @('mednafen_wswan') }
+    '.wsc' = @{ System = 'Bandai - WonderSwan Color';      Cores = @('mednafen_wswan') }
+    '.col' = @{ System = 'Coleco - ColecoVision';          Cores = @('gearcoleco', 'bluemsx') }
+    '.lnx' = @{ System = 'Atari - Lynx';                   Cores = @('handy') }
+    '.vb'  = @{ System = 'Nintendo - Virtual Boy';         Cores = @('mednafen_vb') }
+}
+$script:PsxCores = @('pcsx_rearmed')
+$script:DiscExt  = @('.chd', '.cue', '.pbp', '.iso', '.ccd', '.toc', '.cbn', '.img', '.mdf')
+
+function Get-CoreStem([string]$corePath) { [IO.Path]::GetFileName($corePath) -replace '_libretro\.3dsx$', '' }
+
 function Get-System([string]$corePath) {
-    $stem = [IO.Path]::GetFileName($corePath) -replace '_libretro\.3dsx$', ''
+    $stem = Get-CoreStem $corePath
     if ($script:Systems.Contains($stem)) { return $script:Systems[$stem] }
     return $null
 }
 
+# The extension that matters: a .zip holding a single ROM counts as that ROM.
+function Get-RomKind([string]$file) {
+    $ext = [IO.Path]::GetExtension($file).ToLower()
+    if ($ext -ne '.zip') { return $ext }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        $z = [IO.Compression.ZipFile]::OpenRead($file)
+        try {
+            foreach ($en in $z.Entries) {
+                $inner = [IO.Path]::GetExtension($en.FullName).ToLower()
+                if ($script:ExtSystems.Contains($inner)) { return $inner }
+            }
+        } finally { $z.Dispose() }
+    } catch {}
+    return $ext
+}
+
+# The installed core for a game, from its extension: the first of the
+# preferred cores that is on the card. Disc images go to PCSX ReARMed. $null
+# when nothing fits; the caller keeps the core chosen by hand.
+function Find-Core([string]$file) {
+    $kind = Get-RomKind $file
+    $prefer = $null
+    if ($script:ExtSystems.Contains($kind)) { $prefer = $script:ExtSystems[$kind].Cores }
+    elseif ($script:DiscExt -contains $kind -or $kind -eq '.m3u') { $prefer = $script:PsxCores }
+    if (-not $prefer) { return $null }
+    foreach ($stem in $prefer) {
+        foreach ($c in $cmbCore.Items) { if ((Get-CoreStem $c) -eq $stem) { return [string]$c } }
+    }
+    return $null
+}
+
+# The libretro thumbnail folder: from the extension when it says, else the core.
+function Get-ThumbSystem([string]$romPath, [string]$corePath) {
+    $kind = Get-RomKind $romPath
+    if ($script:ExtSystems.Contains($kind)) { return $script:ExtSystems[$kind].System }
+    return (Get-System $corePath)
+}
+
 # Downloads Named_Titles / Named_Boxarts from libretro (plain HTTP, like the console app).
-function Get-LibretroArt([string]$kind, [string]$gameName = $script:GameName, [string]$romPath = $script:Rom) {
-    $system = Get-System $cmbCore.Text
+function Get-LibretroArt([string]$kind, [string]$gameName = $script:GameName, [string]$romPath = $script:Rom, [string]$corePath = $cmbCore.Text) {
+    $system = Get-ThumbSystem $romPath $corePath
     if (-not $system -or -not $gameName) { return $null }
     $names = @($gameName)
     if ([IO.Path]::GetExtension($romPath) -ieq '.m3u') { $names += "$gameName (Disc 1)" }
     foreach ($n in $names) {
         $file = ($n -replace '[&*/:`"<>?\\|]', '_') + '.png'
-        $dest = Join-Path $script:CacheDir ("libretro_{0}_{1}" -f $kind, $file)
+        $dest = Join-Path $script:CacheDir ("libretro_{0}_{1}_{2}" -f ($system -replace '[^A-Za-z0-9]', ''), $kind, $file)
         if (Test-Path -LiteralPath $dest) { return $dest }
         $url = "$($script:Thumbs)/$([Uri]::EscapeDataString($system))/$kind/$([Uri]::EscapeDataString($file))"
         try {
@@ -835,7 +910,8 @@ $btnLogoClear.Add_Click({ $script:Logo = $null; $script:LogoIsLocal = $false; Up
 $btnBgClear.Add_Click({ $script:Bg = $null; $script:BgIsLocal = $false; Update-Preview })
 $btnIconClear.Add_Click({ $script:IconImg = $null; $script:IconIsLocal = $false; Update-Preview })
 
-$romFilter = 'Juegos (*.chd;*.m3u;*.cue;*.pbp;*.iso;*.ccd;*.toc;*.bin;*.sfc;*.smc;*.nes;*.gba;*.gb;*.gbc;*.md;*.gen;*.zip;*.7z)|*.chd;*.m3u;*.cue;*.pbp;*.iso;*.ccd;*.toc;*.bin;*.sfc;*.smc;*.nes;*.gba;*.gb;*.gbc;*.md;*.gen;*.zip;*.7z|Todos los archivos|*.*'
+$romPatterns = (@('.chd', '.m3u', '.cue', '.pbp', '.iso', '.ccd', '.toc', '.bin', '.zip', '.7z') + @($script:ExtSystems.Keys) | ForEach-Object { "*$_" }) -join ';'
+$romFilter = "Juegos|$romPatterns|Todos los archivos|*.*"
 # Loads a game of the SD card into the main window.
 function Load-Game([string]$file) {
     $sd = Get-SdRoot
@@ -852,6 +928,8 @@ function Load-Game([string]$file) {
     $clean = Get-CleanName $script:GameName
     $lblRom.Text = [IO.Path]::GetFileName($file)
     $txtName.Text = $clean
+    $core = Find-Core $file
+    if ($core) { $cmbCore.SelectedItem = $core }
 
     # local art first (logos\, covers\, icons\), then libretro, then SteamGridDB
     $names = @($script:GameName, $clean)
@@ -890,7 +968,7 @@ $btnRom.Add_Click({
 # ---------------------------------------------------------------- build
 # Builds one CIA: picks the title id, renders the art, runs fwdgen-pc.
 # Returns @{ Tid; Version; Status } or throws.
-function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out) {
+function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem) {
     $sd = Get-SdRoot
     $t = Invoke-Cli ("tid --sd {0} --rom {1}" -f (Q $sd), (Q $sdRom))
     if ($t.ERROR -or -not $t.TID) { throw "Title ID: $(if ($t.ERROR) { $t.ERROR } else { 'sin respuesta' })" }
@@ -901,7 +979,7 @@ function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo,
 
     $name = ($name -replace '"', '').Trim()
     $cliArgs = "build --sd {0} --template {1} --rom {2} --core {3} --name {4} --publisher {5} --tid {6} --out {7}" -f `
-        (Q $sd), (Q $script:Template), (Q $sdRom), (Q ([string]$cmbCore.SelectedItem)), (Q $name), (Q (($txtPub.Text -replace '"', '').Trim())), $t.TID, (Q $out)
+        (Q $sd), (Q $script:Template), (Q $sdRom), (Q $core), (Q $name), (Q (($txtPub.Text -replace '"', '').Trim())), $t.TID, (Q $out)
     if (Test-Path -LiteralPath $i) { $cliArgs += " --icon $(Q $i)" }
     if (Test-Path -LiteralPath $b) { $cliArgs += " --banner $(Q $b)" }
     if ((Test-Path -LiteralPath $b) -and $transparent -and $logo) { $cliArgs += ' --transparent' }
@@ -954,9 +1032,7 @@ $btnBuild.Add_Click({
 
 
 # ---------------------------------------------------------------- batch
-$script:DiscExt = @('.chd', '.cue', '.pbp', '.iso', '.ccd', '.toc', '.cbn', '.img', '.mdf')
-$script:RomExt  = $script:DiscExt + @('.m3u', '.bin', '.sfc', '.smc', '.nes', '.fds', '.gba', '.gb', '.gbc', '.md', '.gen', '.smd',
-                                      '.32x', '.sms', '.gg', '.pce', '.ngp', '.ws', '.wsc', '.col', '.a26', '.lnx', '.zip', '.7z')
+$script:RomExt  = $script:DiscExt + @('.m3u', '.bin', '.zip', '.7z') + @($script:ExtSystems.Keys)
 # When one game is there in several formats, the first wins.
 $script:ExtRank = @('.m3u', '.chd', '.pbp', '.cue', '.iso', '.ccd', '.toc', '.cbn', '.img', '.mdf')
 
@@ -1075,6 +1151,8 @@ function Show-Batch {
     $bf = New-Object System.Windows.Forms.Form
     $bf.Text = 'Crear CIAs de varios juegos'
     $bf.ClientSize = New-Object System.Drawing.Size(760, 570)
+    # Each game gets the core for its extension (.gb gambatte, .sfc snes9x...);
+    # only extensions that say nothing (.bin, .7z) fall back to the main window's.
     $bf.StartPosition = 'CenterParent'
     $bf.FormBorderStyle = 'FixedSingle'
     $bf.MaximizeBox = $false
@@ -1107,9 +1185,10 @@ function Show-Batch {
 
     $lv = BAdd (New-Object System.Windows.Forms.ListView) 12 92 736 370
     $lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $true
-    [void]$lv.Columns.Add('Juego', 260)
-    [void]$lv.Columns.Add('Archivo', 270)
-    [void]$lv.Columns.Add('Estado', 180)
+    [void]$lv.Columns.Add('Juego', 230)
+    [void]$lv.Columns.Add('Archivo', 220)
+    [void]$lv.Columns.Add('Core', 110)
+    [void]$lv.Columns.Add('Estado', 150)
     $hint = BAdd (New-Object System.Windows.Forms.Label) 12 465 736 20
     $hint.Text = 'Doble clic en un juego: cierra esta ventana y lo abre en la ventana principal para ajustarlo a mano.'
     $hint.ForeColor = [System.Drawing.Color]::DimGray
@@ -1135,6 +1214,10 @@ function Show-Batch {
                 $sdRom = 'sdmc:' + $g.File.Substring($sd.Length).Replace('\', '/')
                 $it = New-Object System.Windows.Forms.ListViewItem((Get-CleanName ([IO.Path]::GetFileNameWithoutExtension($g.File))))
                 [void]$it.SubItems.Add($g.File.Substring($txtDir.Text.TrimEnd('\').Length).TrimStart('\'))
+                # The core follows the extension; unknown ones (.bin, .7z...) take the main window's.
+                $core = Find-Core $g.File
+                $g | Add-Member -NotePropertyName Core -NotePropertyValue $(if ($core) { $core } else { [string]$cmbCore.SelectedItem }) -Force
+                [void]$it.SubItems.Add((Get-CoreStem $g.Core) + $(if ($core) { '' } else { ' (elegido)' }))
                 $note = $g.Note
                 $has = $reg.Contains($sdRom)
                 if ($has) { $note = $(if ($note) { "$note, " } else { '' }) + 'ya tiene forwarder' }
@@ -1190,7 +1273,7 @@ function Show-Batch {
             if ($state.Stop) { break }
             $g = $it.Tag
             $lv.EnsureVisible($it.Index)
-            $it.SubItems[2].Text = 'Preparando...'; $it.ForeColor = [System.Drawing.SystemColors]::WindowText
+            $it.SubItems[3].Text = 'Preparando...'; $it.ForeColor = [System.Drawing.SystemColors]::WindowText
             [System.Windows.Forms.Application]::DoEvents()
             try {
                 if ($g.Discs) {
@@ -1206,7 +1289,7 @@ function Show-Batch {
                 $logo = Find-Local 'logos' $names; $bg = Find-Local 'covers' $names; $icon = Find-Local 'icons' $names
                 $src = @()
                 if ($chkSg.Checked -and (-not $logo -or -not $bg -or -not $icon)) {
-                    $it.SubItems[2].Text = 'SteamGridDB...'; [System.Windows.Forms.Application]::DoEvents()
+                    $it.SubItems[3].Text = 'SteamGridDB...'; [System.Windows.Forms.Application]::DoEvents()
                     try {
                         $a = Get-SgdbAuto $clean
                         if ($a) {
@@ -1216,20 +1299,20 @@ function Show-Batch {
                     } catch { $src += 'SGDB no respondio'; Write-Log "SGDB ${clean}: $($_.Exception.Message)" }
                 }
                 if (-not $bg) {
-                    $bg = Get-LibretroArt 'Named_Titles' $stem $g.File
+                    $bg = Get-LibretroArt 'Named_Titles' $stem $g.File $g.Core
                     if ($bg) { $src += 'fondo libretro' }
                 }
 
-                $it.SubItems[2].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
+                $it.SubItems[3].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
                 $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
-                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out
-                $it.SubItems[2].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
+                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core
+                $it.SubItems[3].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
                 $it.ForeColor = [System.Drawing.Color]::DarkGreen
                 $it.Checked = $false
                 if ($src) { $it.ToolTipText = $src -join ', ' }
                 $ok++
             } catch {
-                $it.SubItems[2].Text = "Error: $($_.Exception.Message)"
+                $it.SubItems[3].Text = "Error: $($_.Exception.Message)"
                 $it.ForeColor = [System.Drawing.Color]::DarkRed
                 Write-Log "LOTE ERROR $($g.File): $($_.Exception.Message)"
                 $bad++

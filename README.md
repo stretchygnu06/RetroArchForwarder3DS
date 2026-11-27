@@ -122,6 +122,15 @@ the SD card (subfolders optional) and builds them all into `<SD>\cias\`.
   background. The transparent banner option and the sound apply to all.
 - Double-click a game to open it in the main window and adjust it by hand.
 
+**Cartridge games**: the core follows the file extension, among the `.3dsx`
+cores on the card: `.gb`/`.gbc` gambatte, `.gba` gpsp, `.nes` nestopia,
+`.sfc`/`.smc` snes9x2005_plus, `.a26` stella2014, and so on, falling back to
+the next installed core for that system. A `.zip` is judged by the ROM inside.
+Extensions that say nothing (`.bin`, `.7z`) keep the core chosen by hand. The
+extension also picks the libretro thumbnail folder, so a `.gb` game looks in
+*Game Boy*, not *Game Boy Color*. In *Varios juegos...* each game gets its own
+core, so one folder can mix systems.
+
 Rebuilding a game keeps its title id and raises the title version, so the
 HOME menu refreshes the icon when the new CIA is installed over the old one.
 The API key is kept in `settings.json`, next to the script, in plain text;
