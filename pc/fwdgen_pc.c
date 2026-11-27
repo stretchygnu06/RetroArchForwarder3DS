@@ -1,7 +1,5 @@
-// fwdgen-pc: the PC side of RetroArch Forwarder Generator.
-//
-// Builds the same CIA as the console app, from the same template and the same
-// patching code, with the artwork prepared on the PC. A GUI drives it.
+// fwdgen-pc: writes the forwarder CIA from the template, with the artwork
+// prepared on the PC. RetroArchForwarderPC.ps1 drives it.
 //
 //   fwdgen-pc tid   --sd E:\ --rom "sdmc:/roms/psx/Game.chd"
 //   fwdgen-pc build --sd E:\ --template template.cia --rom ... --core ...
@@ -11,12 +9,11 @@
 //                   --out Game.cia
 //
 // The SD card is read for two things: the titles installed on it (the
-// folder names under "Nintendo 3DS\...\title\00040000") and the registry the
-// console app keeps in sdmc:/forwarders/registry.txt. The same rules apply as
-// on the console: a game keeps its id, and an id held by another title is
-// never reused. The one thing the PC cannot do is read a title's product
-// code (the SD copy is encrypted), so an installed title the registry does
-// not attribute to this ROM always counts as someone else's.
+// folder names under "Nintendo 3DS\...\title\00040000") and the registry
+// sdmc:/forwarders/registry.txt. A game keeps its id, and an id held by
+// another title is never reused. The PC cannot read a title's product code
+// (the SD copy is encrypted), so an installed title the registry does not
+// attribute to this ROM always counts as someone else's.
 
 #include <stdint.h>
 #include <stdio.h>
@@ -214,9 +211,9 @@ static bool idTaken(uint64_t tid, void* ctx)
 // ---------------------------------------------------------------- versions
 
 // The HOME menu only refreshes a cached icon when the title version changes.
-// The console reads the installed version; the PC cannot, so it keeps its
-// own count in sdmc:/forwarders/versions.txt, starting well above what the
-// console hands out.
+// The installed version cannot be read from the PC (the SD copy is
+// encrypted), so a count is kept in sdmc:/forwarders/versions.txt, starting
+// at 2048.
 static unsigned nextVersion(const char* sd, uint64_t tid)
 {
 	char path[1024], want[20];
@@ -428,7 +425,7 @@ static int cmdBuild(int argc, char** argv)
 	fclose(f);
 	free(data);
 
-	// Reserve the id for this game, the way the console does after installing.
+	// Reserve the id for this game before it is even installed.
 	{
 		char line[1200];
 		if (!(idRegistryFind(s_registry, rom, &known) && known == tid))

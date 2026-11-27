@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grows the banner section of romfs/template.cia, so a longer banner sound fits.
+"""Grows the banner section of template/template.cia, so a longer banner sound fits.
 
 The banner is the only ExeFS section allowed to change size between builds,
 so the template reserves room for it. 256 KB held the artwork and about one
@@ -9,7 +9,7 @@ Every section after the banner moves down, and every size that covers them
 grows: ExeFS, NCCH, the CIA content size and the TMD content chunk. Hashes are
 recomputed afterwards by host/reseal (cia_reseal), the same code the apps use.
 
-    python3 tools/grow_banner.py romfs/template.cia 0x80000
+    python3 tools/grow_banner.py template/template.cia 0x80000
 """
 import struct
 import sys

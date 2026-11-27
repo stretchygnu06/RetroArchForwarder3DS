@@ -2,15 +2,15 @@
 <#
   RetroArch Forwarder PC
   ---------------------------------------------------------------
-  Crea en Windows el mismo CIA que fwdgen.3dsx (RetroArch Forwarder
-  Generator): un icono en el menu HOME que abre un juego de la SD en tu
+  Crea en Windows un forwarder (CIA): un icono en el menu HOME que abre
+  un juego de la SD en tu
   RetroArch instalado, con tu configuracion y tus partidas.
 
   - Logo, fondo e icono desde SteamGridDB (API key) o archivos locales.
   - Vista previa del banner (256x128) y del icono (48x48).
   - Lee la SD para elegir un Title ID libre: nunca reutiliza el de otro
     titulo instalado (por ejemplo tus forwarders de DS).
-  - El CIA lo arma fwdgen-pc.exe con el mismo codigo que la app de 3DS.
+  - El CIA lo arma fwdgen-pc.exe a partir de template.cia.
 #>
 
 $ErrorActionPreference = 'Stop'

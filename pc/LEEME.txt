@@ -1,7 +1,7 @@
 RetroArch Forwarder PC
 ======================
 
-Crea en Windows el mismo CIA que fwdgen.3dsx: un icono en el menu HOME que
+Crea en Windows un forwarder (CIA): un icono en el menu HOME que
 abre un juego de tu SD directamente en tu RetroArch instalado, con tu
 configuracion, tus overrides y tus partidas de siempre.
 
@@ -71,7 +71,7 @@ JUEGOS DE CARTUCHO (GB, GBC, GBA, NES, SNES, ATARI 2600...)
 
 TITLE ID
 - El programa revisa los titulos instalados en la SD y el registro
-  sdmc:/forwarders/registry.txt (el mismo que usa fwdgen.3dsx).
+  sdmc:/forwarders/registry.txt, que se guarda en la SD.
 - Nunca usa el ID de otro titulo instalado (por ejemplo tus forwarders
   de DS): si esta ocupado, toma el siguiente libre y te lo dice.
 - Si vuelves a crear el CIA de un juego, conserva su ID y sube la version,
