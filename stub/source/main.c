@@ -86,12 +86,13 @@ static void set_salamander(const char* core)
 	fclose(f);
 }
 
-static Result hbldr_call(u32 header, const void* buf, size_t len)
+// hb:ldr receives the target in static buffer 0 and the arguments in buffer 1.
+static Result hbldr_call(u32 header, const void* buf, size_t len, int id)
 {
 	u32* cmd = getThreadCommandBuffer();
 	Result rc;
 	cmd[0] = header;
-	cmd[1] = IPC_Desc_StaticBuffer(len, 0);
+	cmd[1] = IPC_Desc_StaticBuffer(len, id);
 	cmd[2] = (u32)buf;
 	rc = svcSendSyncRequest(hbldr);
 	return R_FAILED(rc) ? rc : (Result)cmd[1];
@@ -125,9 +126,9 @@ int main(void)
 	memcpy(args + core_len, rom, rom_len);
 	argbuf[0] = 2;
 
-	rc = hbldr_call(IPC_MakeHeader(2, 0, 2), target, strlen(target) + 1);
+	rc = hbldr_call(IPC_MakeHeader(2, 0, 2), target, strlen(target) + 1, 0);
 	if (R_FAILED(rc)) { fail("hb:ldr SetTarget", rc); gfxExit(); return 0; }
-	rc = hbldr_call(IPC_MakeHeader(3, 0, 2), argbuf, sizeof(argbuf));
+	rc = hbldr_call(IPC_MakeHeader(3, 0, 2), argbuf, sizeof(argbuf), 1);
 	if (R_FAILED(rc)) { fail("hb:ldr SetArgv", rc); gfxExit(); return 0; }
 	// The handle stays open, as in the original stub, until the process ends.
 	set_salamander(core);
