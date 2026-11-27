@@ -281,7 +281,7 @@ public static class FwdArt
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sound = $null }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Publisher = 'RetroArch forwarder'; Transparent = $false; Sound = $null; LastRomDir = ''; LastBatchDir = '' }
 if (Test-Path -LiteralPath $script:Settings) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
@@ -291,6 +291,8 @@ if (Test-Path -LiteralPath $script:Settings) {
         if ($j.Publisher)          { $script:Cfg.Publisher = [string]$j.Publisher }
         if ($null -ne $j.Transparent) { $script:Cfg.Transparent = [bool]$j.Transparent }
         if ($null -ne $j.Sound)    { $script:Cfg.Sound     = [string]$j.Sound }
+        if ($j.LastRomDir)         { $script:Cfg.LastRomDir   = [string]$j.LastRomDir }
+        if ($j.LastBatchDir)       { $script:Cfg.LastBatchDir = [string]$j.LastBatchDir }
     } catch {}
 }
 # First run: reuse the key already saved by PS1 Forwarder Creator Plus, if it
@@ -315,6 +317,25 @@ if ($null -eq $script:Cfg.Sound) {
         if ($w) { $script:Cfg.Sound = $w.FullName }
     } catch {}
 }
+# Folders are remembered relative to the SD card ("\roms\psx"), so they still
+# work when Windows gives the card another drive letter.
+function Get-RememberedDir([string]$sd, [string]$rel) {
+    if ($rel) {
+        $p = $sd + $rel
+        while ($p.Length -gt $sd.Length) {
+            if (Test-Path -LiteralPath $p -PathType Container) { return $p }
+            $p = Split-Path -Parent $p          # the folder was removed: its parent
+        }
+    }
+    return "$sd\"
+}
+function Set-RememberedDir([string]$sd, [string]$dir, [string]$key) {
+    if ($dir.StartsWith($sd, [StringComparison]::OrdinalIgnoreCase)) {
+        $script:Cfg[$key] = $dir.Substring($sd.Length).TrimEnd('\')
+        Save-Settings
+    }
+}
+
 function Save-Settings { $script:Cfg | ConvertTo-Json | Set-Content -LiteralPath $script:Settings -Encoding UTF8 }
 
 # ---------------------------------------------------------------- state
@@ -960,8 +981,10 @@ $btnRom.Add_Click({
     if (-not $sd) { Show-Error 'Primero conecta la SD de tu 3DS y dale a Actualizar.'; return }
     $d = New-Object System.Windows.Forms.OpenFileDialog
     $d.Filter = $romFilter
-    $d.InitialDirectory = "$sd\"
+    $d.InitialDirectory = Get-RememberedDir $sd $script:Cfg.LastRomDir
+    $d.RestoreDirectory = $true
     if ($d.ShowDialog() -ne 'OK') { return }
+    Set-RememberedDir $sd ([IO.Path]::GetDirectoryName($d.FileName)) 'LastRomDir'
     Load-Game $d.FileName
 })
 
@@ -1234,13 +1257,14 @@ function Show-Batch {
     $btnDir.Add_Click({
         $d = New-Object System.Windows.Forms.FolderBrowserDialog
         $d.Description = 'Carpeta de juegos en la SD'
-        $d.SelectedPath = $(if ($txtDir.Text) { $txtDir.Text } else { "$sd\" })
+        $d.SelectedPath = $(if ($txtDir.Text) { $txtDir.Text } else { Get-RememberedDir $sd $script:Cfg.LastBatchDir })
         if ($d.ShowDialog() -ne 'OK') { return }
         if (-not ($d.SelectedPath + '\').StartsWith("$sd\", [StringComparison]::OrdinalIgnoreCase)) {
             Show-Error "La carpeta tiene que estar en la SD ($sd)."
             return
         }
         $txtDir.Text = $d.SelectedPath
+        Set-RememberedDir $sd $d.SelectedPath 'LastBatchDir' 
         & $scan
     })
     $chkRec.Add_CheckedChanged({ & $scan })
