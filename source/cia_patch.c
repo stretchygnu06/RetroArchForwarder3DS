@@ -220,42 +220,54 @@ void cia_reseal(cia_t* cia)
 
 // Rewrites the SMDH titles in place. Simpler than rebuilding a whole SMDH:
 // the template icon is kept as is.
+//
+// The text is UTF-8 (the GUI passes it so): accents and the like reach the
+// HOME menu. Characters beyond 16 bits and broken sequences become '?'.
 static void put_utf16(uint8_t* dst, size_t chars, const char* text)
 {
-	size_t i;
+	const unsigned char* s = (const unsigned char*)text;
+	size_t n = 0;
 	memset(dst, 0, chars * 2);
-	for (i = 0; text[i] && i + 1 < chars; i++)
+	while (*s && n + 1 < chars)
 	{
-		// File names are taken as they come: ASCII is enough here, and any
-		// non-ASCII byte is replaced rather than yielding invalid UTF-16.
-		unsigned char c = (unsigned char)text[i];
-		dst[i * 2] = (c < 0x80) ? c : '?';
-		dst[i * 2 + 1] = 0;
+		uint32_t c = *s++;
+		if (c >= 0xC0 && c < 0xE0 && (s[0] & 0xC0) == 0x80)
+			c = ((c & 0x1F) << 6) | (*s++ & 0x3F);
+		else if (c >= 0xE0 && c < 0xF0 && (s[0] & 0xC0) == 0x80 && (s[1] & 0xC0) == 0x80)
+		{
+			c = ((c & 0x0F) << 12) | ((s[0] & 0x3F) << 6) | (s[1] & 0x3F);
+			s += 2;
+		}
+		else if (c >= 0x80)
+		{
+			while ((*s & 0xC0) == 0x80) s++;
+			c = '?';
+		}
+		if (c >= 0xD800 && c <= 0xDFFF) c = '?';
+		dst[n * 2] = (uint8_t)c;
+		dst[n * 2 + 1] = (uint8_t)(c >> 8);
+		n++;
 	}
+}
+
+int smdh_set_titles(uint8_t* smdh, const char* name, const char* publisher)
+{
+	int lang;
+	if (memcmp(smdh, "SMDH", 4) != 0) return CIA_ERR_FORMAT;
+	for (lang = 0; lang < 16; lang++)
+	{
+		uint8_t* t = smdh + 0x08 + (size_t)lang * 0x200;
+		put_utf16(t, 0x40, name);             // short title
+		put_utf16(t + 0x80, 0x80, name);      // long title
+		put_utf16(t + 0x180, 0x40, publisher);
+	}
+	return CIA_OK;
 }
 
 int cia_set_titles(cia_t* cia, const char* name, const char* publisher)
 {
-	const char* entry_name;
-	size_t off, size;
-	int index, lang;
-
-	for (index = 0; index < 10; index++)
-	{
-		if (!exefs_entry(cia, index, &entry_name, &off, &size)) continue;
-		if (!name_is(entry_name, "icon")) continue;
-		if (memcmp(cia->data + off, "SMDH", 4) != 0) return CIA_ERR_FORMAT;
-
-		for (lang = 0; lang < 16; lang++)
-		{
-			uint8_t* t = cia->data + off + 0x08 + (size_t)lang * 0x200;
-			put_utf16(t, 0x40, name);             // short title
-			put_utf16(t + 0x80, 0x80, name);      // long title
-			put_utf16(t + 0x180, 0x40, publisher);
-		}
-		return CIA_OK;
-	}
-	return CIA_ERR_FORMAT;
+	uint8_t* smdh = cia_icon_data(cia);
+	return smdh ? smdh_set_titles(smdh, name, publisher) : CIA_ERR_FORMAT;
 }
 
 int cia_set_rom_path(cia_t* cia, const char* path)

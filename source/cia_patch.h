@@ -34,6 +34,8 @@ void cia_set_title_id(cia_t* cia, uint64_t tid);
 void cia_set_process_name(cia_t* cia, const char* name);
 void cia_reseal(cia_t* cia);
 int cia_set_titles(cia_t* cia, const char* name, const char* publisher);
+// Same on a bare SMDH (0x36C0 bytes). Text is UTF-8.
+int smdh_set_titles(uint8_t* smdh, const char* name, const char* publisher);
 
 // Pointer to the SMDH inside the ExeFS, to patch the icon in place.
 uint8_t* cia_icon_data(cia_t* cia);

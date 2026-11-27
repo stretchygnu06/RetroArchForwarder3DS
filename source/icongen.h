@@ -30,3 +30,6 @@ bool iconFindArtwork(const char* rom_path, const char* kind,
 
 // Decodes the image and writes both icon areas of the SMDH.
 bool iconApply(uint8_t* smdh, const char* png_path);
+
+// Same from a square RGB image already in memory.
+bool iconApplyRgb(uint8_t* smdh, const unsigned char* rgb, int side);

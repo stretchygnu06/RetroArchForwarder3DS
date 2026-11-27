@@ -7,6 +7,15 @@
 //                   --icon icon.png --banner banner.png [--transparent]
 //                   [--sound jingle.wav]
 //                   --out Game.cia
+//   fwdgen-pc ndsinfo --rom Game.nds [--icon-bmp icon.bmp]
+//   fwdgen-pc ds    --template template.cia --rom Game.nds --name "Game"
+//                   [--publisher ...] [--banner banner.png [--transparent]]
+//                   [--sound boot.wav] --banner-out banner.bin --smdh-out icon.smdh
+//
+// ds writes the two pieces a DS forwarder takes from here, for makerom: the
+// banner (the template's, with the image and the sound) and the SMDH (the
+// template's, with the titles and the DS icon of the ROM, made as YANBF makes
+// it).
 //
 // The SD card is read for two things: the titles installed on it (the
 // folder names under "Nintendo 3DS\...\title\00040000") and the registry
@@ -34,6 +43,7 @@
 #include "../source/icongen.h"
 #include "../source/idalloc.h"
 #include "../source/cwav.h"
+#include "../source/ndsicon.h"
 
 #define MAX_INSTALLED 4096
 
@@ -443,11 +453,179 @@ static int cmdBuild(int argc, char** argv)
 	return 0;
 }
 
+// ---------------------------------------------------------------- DS
+static int readNds(const char* path, uint8_t hdr[NDS_HEADER_SIZE], uint8_t banner[NDS_BANNER_MAX], size_t* blen)
+{
+	FILE* f = ufopen(path, "rb");
+	uint32_t off;
+	if (!f) return 0;
+	if (fread(hdr, 1, NDS_HEADER_SIZE, f) != NDS_HEADER_SIZE) { fclose(f); return 0; }
+	off = ndsBannerOffset(hdr);
+	if (!off || off > 0x7FFFFFFF || fseek(f, (long)off, SEEK_SET) != 0) { fclose(f); return 0; }
+	*blen = fread(banner, 1, NDS_BANNER_MAX, f);
+	fclose(f);
+	return *blen > 0;
+}
+
+static int writeBmp(const char* path, const uint8_t* rgb, int w, int h)
+{
+	uint8_t hd[54] = { 'B', 'M' };
+	int row = (w * 3 + 3) & ~3, y, x;
+	uint32_t size = 54 + (uint32_t)row * h;
+	FILE* f = ufopen(path, "wb");
+	uint8_t line[1024] = { 0 };
+	if (!f || row > (int)sizeof(line)) { if (f) fclose(f); return 0; }
+#define W32(o, v) (hd[o] = (uint8_t)(v), hd[o + 1] = (uint8_t)((v) >> 8), hd[o + 2] = (uint8_t)((v) >> 16), hd[o + 3] = (uint8_t)((v) >> 24))
+	W32(2, size); W32(10, 54); W32(14, 40); W32(18, w); W32(22, h);
+	hd[26] = 1; hd[28] = 24;
+#undef W32
+	fwrite(hd, 1, 54, f);
+	for (y = h - 1; y >= 0; y--)
+	{
+		for (x = 0; x < w; x++)
+		{
+			line[x * 3] = rgb[(y * w + x) * 3 + 2];
+			line[x * 3 + 1] = rgb[(y * w + x) * 3 + 1];
+			line[x * 3 + 2] = rgb[(y * w + x) * 3];
+		}
+		fwrite(line, 1, (size_t)row, f);
+	}
+	fclose(f);
+	return 1;
+}
+
+static int cmdNdsInfo(int argc, char** argv)
+{
+	const char* rom = arg(argc, argv, "--rom");
+	const char* bmp = arg(argc, argv, "--icon-bmp");
+	static uint8_t banner[NDS_BANNER_MAX];
+	uint8_t hdr[NDS_HEADER_SIZE], rgb[48 * 48 * 3];
+	static nds_info info;
+	char line[512], name[1024];
+	size_t blen = 0;
+	int lines, i;
+
+	if (!rom) { fprintf(stderr, "ndsinfo: --rom is required\n"); return 2; }
+	if (!readNds(rom, hdr, banner, &blen)) { printf("ERROR=not a DS ROM\n"); return 3; }
+	if (ndsReadInfo(hdr, banner, blen, &info) != 0) { printf("ERROR=the ROM has no banner\n"); return 3; }
+	printf("GAMECODE=%s\n", info.gamecode);
+
+	// "Star Wars\nThe Force Unleashed\nLucasArts": the last line is the
+	// publisher, the others the name.
+	lines = ndsTitleLines(&info, 1);
+	name[0] = 0;
+	for (i = 0; i < (lines > 1 ? lines - 1 : lines); i++)
+	{
+		ndsTitleLine(&info, 1, i, line, sizeof(line));
+		if (name[0] && line[0]) strncat(name, " ", sizeof(name) - strlen(name) - 1);
+		strncat(name, line, sizeof(name) - strlen(name) - 1);
+	}
+	printf("TITLE=%s\n", name);
+	if (lines > 1) { ndsTitleLine(&info, 1, -1, line, sizeof(line)); printf("MAKER=%s\n", line); }
+
+	if (bmp)
+	{
+		if (ndsIcon48(banner, blen, rgb) != 0 || !writeBmp(bmp, rgb, 48, 48)) { printf("ERROR=icon\n"); return 4; }
+		printf("ICON=%s\n", bmp);
+	}
+	return 0;
+}
+
+static int writeFile(const char* path, const uint8_t* d, size_t n)
+{
+	FILE* f = ufopen(path, "wb");
+	if (!f) return 0;
+	if (fwrite(d, 1, n, f) != n) { fclose(f); return 0; }
+	return fclose(f) == 0;
+}
+
+static int cmdDs(int argc, char** argv)
+{
+	const char* tpl = arg(argc, argv, "--template");
+	const char* rom = arg(argc, argv, "--rom");
+	const char* name = arg(argc, argv, "--name");
+	const char* pub = arg(argc, argv, "--publisher");
+	const char* banner = arg(argc, argv, "--banner");
+	const char* sound = arg(argc, argv, "--sound");
+	const char* bannerOut = arg(argc, argv, "--banner-out");
+	const char* smdhOut = arg(argc, argv, "--smdh-out");
+	static uint8_t nb[NDS_BANNER_MAX];
+	uint8_t hdr[NDS_HEADER_SIZE], rgb[48 * 48 * 3], smdh[0x36C0];
+	uint8_t *data, *icon, *bnr, *cur;
+	size_t len, blen = 0, reserved = 0, curLen;
+	cia_t cia;
+	int err;
+
+	if (!tpl || !rom || !name || !bannerOut || !smdhOut)
+	{
+		fprintf(stderr, "ds: --template --rom --name --banner-out --smdh-out are required\n");
+		return 2;
+	}
+	if (!readNds(rom, hdr, nb, &blen) || ndsIcon48(nb, blen, rgb) != 0) { printf("ERROR=not a DS ROM with an icon\n"); return 3; }
+
+	data = readAll(tpl, &len);
+	if (!data) { printf("ERROR=template not found\n"); return 3; }
+	if ((err = cia_open(&cia, data, len)) != CIA_OK) { printf("ERROR=template unreadable (%d)\n", err); return 3; }
+
+	// The SMDH: the template's, with this game's titles and DS icon.
+	icon = cia_icon_data(&cia);
+	if (!icon) { printf("ERROR=template has no icon\n"); return 3; }
+	memcpy(smdh, icon, sizeof(smdh));
+	if (smdh_set_titles(smdh, name, pub ? pub : "Nintendo DS") != CIA_OK || !iconApplyRgb(smdh, rgb, 48))
+	{
+		printf("ERROR=icon\n");
+		return 3;
+	}
+
+	// The banner: the template's, worked on in a buffer of its own.
+	bnr = cia_banner_data(&cia, &reserved);
+	if (!bnr) { printf("ERROR=template has no banner\n"); return 3; }
+	curLen = cia_banner_size(&cia);
+	cur = malloc(reserved);
+	if (!cur) return 3;
+	memcpy(cur, bnr, curLen);
+	if (banner)
+	{
+		uint8_t* rebuilt = malloc(reserved);
+		size_t n = !rebuilt ? 0
+			: flag(argc, argv, "--transparent") ? bannerReplaceImageAlpha(cur, curLen, banner, rebuilt, reserved)
+			: bannerReplaceImage(cur, curLen, banner, rebuilt, reserved);
+		if (!n) { free(rebuilt); printf("ERROR=banner image unreadable\n"); return 3; }
+		free(cur); cur = rebuilt; curLen = n;
+	}
+	if (sound)
+	{
+		size_t wlen = 0, clen, n;
+		uint8_t* wav = readAll(sound, &wlen);
+		uint8_t *cw = NULL, *rebuilt;
+		const char* why = "file not found";
+		if (!wav || !(clen = cwavFromWav(wav, wlen, &cw, &why))) { free(wav); printf("ERROR=sound: %s\n", why); return 3; }
+		free(wav);
+		rebuilt = malloc(reserved);
+		n = rebuilt ? bannerSetSound(cur, curLen, cw, clen, rebuilt, reserved) : 0;
+		free(cw);
+		if (!n) { free(rebuilt); printf("ERROR=sound too long for the banner\n"); return 3; }
+		free(cur); cur = rebuilt; curLen = n;
+	}
+
+	if (!writeFile(bannerOut, cur, curLen) || !writeFile(smdhOut, smdh, sizeof(smdh)))
+	{
+		printf("ERROR=could not write the output files\n");
+		return 4;
+	}
+	free(cur);
+	free(data);
+	printf("OK=%s\nBANNER_SIZE=%lu\n", bannerOut, (unsigned long)curLen);
+	return 0;
+}
+
 static int run(int argc, char** argv)
 {
 	if (argc >= 2 && strcmp(argv[1], "tid") == 0) return cmdTid(argc, argv);
 	if (argc >= 2 && strcmp(argv[1], "build") == 0) return cmdBuild(argc, argv);
-	fprintf(stderr, "usage: fwdgen-pc tid|build ...\n");
+	if (argc >= 2 && strcmp(argv[1], "ndsinfo") == 0) return cmdNdsInfo(argc, argv);
+	if (argc >= 2 && strcmp(argv[1], "ds") == 0) return cmdDs(argc, argv);
+	fprintf(stderr, "usage: fwdgen-pc tid|build|ndsinfo|ds ...\n");
 	return 1;
 }
 

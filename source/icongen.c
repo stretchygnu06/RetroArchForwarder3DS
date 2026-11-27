@@ -141,6 +141,14 @@ bool iconFindArtwork(const char* rom_path, const char* kind,
 	return false;
 }
 
+bool iconApplyRgb(uint8_t* smdh, const unsigned char* rgb, int side)
+{
+	if (!smdh || !rgb || side < 24) return false;
+	tileInto(smdh + SMDH_ICON_SMALL_OFF, rgb, side, side, 24);
+	tileInto(smdh + SMDH_ICON_LARGE_OFF, rgb, side, side, 48);
+	return true;
+}
+
 bool iconApply(uint8_t* smdh, const char* png_path)
 {
 	int w, h, comp, side;

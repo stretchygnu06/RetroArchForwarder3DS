@@ -27,6 +27,7 @@ jobs:
           gcc -O2 -Wall -o build-host/test_cwav host/test_cwav.c source/cwav.c
           gcc -O2 -Wall -o build-host/reseal host/reseal.c source/cia_patch.c source/sha256.c
           gcc -O2 -w     -o build-host/test_compose host/test_compose.c source/bannergen.c source/icongen.c -lm
+          gcc -O2 -Wall -o build-host/test_ndsicon host/test_ndsicon.c source/ndsicon.c -lm
 
       # Only the self-contained ones run here. test_icon, test_banner and
       # test_patch need input files that are not in the repository; building
@@ -53,7 +54,7 @@ jobs:
         run: |
           set -eu
           mkdir -p "dist/RetroArch Forwarder PC"
-          cp pc/fwdgen-pc.exe pc/RetroArchForwarderPC.ps1 "pc/RetroArch Forwarder PC.bat" pc/LEEME.txt template/template.cia "dist/RetroArch Forwarder PC/"
+          cp pc/fwdgen-pc.exe pc/RetroArchForwarderPC.ps1 "pc/RetroArch Forwarder PC.bat" pc/DSForwarderPC.ps1 "pc/DS Forwarder PC.bat" pc/FwdArt.cs pc/LEEME.txt template/template.cia "dist/RetroArch Forwarder PC/"
 
       - uses: actions/upload-artifact@v4
         with:

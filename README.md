@@ -40,6 +40,9 @@ The interface is in Spanish. Download `RetroArch-Forwarder-PC.zip` from the
 
 - `RetroArch Forwarder PC.bat`, `RetroArchForwarderPC.ps1` and a short guide
   (`LEEME.txt`, in Spanish), from `pc/`
+- `FwdArt.cs`, the image code both windows share
+- `DS Forwarder PC.bat` and `DSForwarderPC.ps1`, see
+  [DS forwarders](#ds-forwarders)
 - `fwdgen-pc.exe`, see [Getting fwdgen-pc.exe](#getting-fwdgen-pcexe)
 - `template.cia`, from `template/`
 
@@ -136,6 +139,28 @@ fwdgen-pc build --sd E: --template template.cia --rom "sdmc:/roms/psx/Game.chd" 
 
 `tid` prints the id the game would get; `build` refuses an id that belongs
 to another title, then records it in the registry.
+
+## DS forwarders
+
+**DS Forwarder PC** is a second window, in the same folder, for Nintendo DS
+games. The forwarder is [YANBF](https://github.com/YANBForwarder/YANBF)'s
+(nds-bootstrap): the CIA is built by YANBF's own `makerom.exe`,
+`forwarder.elf` and `build-cia.rsf`, taken from its `generator` folder. What
+changes is the banner and the SMDH, which `fwdgen-pc ds` writes:
+
+- the banner, the same as RetroArch Forwarder PC makes (SteamGridDB logo and
+  background, transparent, or the libretro box art), with YANBF's DS boot
+  sound by default;
+- the icon, taken from the ROM exactly as YANBF takes it: the DS icon, or the
+  first frame of the DSi animated one when its checksum holds, on white, scaled
+  to 48x48 with Pillow's bilinear filter. `host/test_ndsicon` checks it byte for
+  byte against YANBF's Python code.
+
+Each game keeps the unique id it had in YANBF (`ids_anteriores.txt`), so the
+new CIA installs over the old one. A new game takes the next index after all
+those used (and `id.txt`), skipping ids held by installed titles, and is
+written back to both files so YANBF's own scripts keep agreeing. Versions
+start at 2.0.0, above YANBF's 1.6.3, and go up with each build.
 
 ## How the forwarder launches the game
 
@@ -302,6 +327,8 @@ MIT, see [LICENSE](LICENSE).
 the public domain (or under MIT, at your option) — either way compatible.
 `source/cwav.c` follows the CWAV layout of
 [bannertool](https://github.com/Steveice10/bannertool) (MIT).
+`source/ndsicon.c` follows the icon extraction of YANBF's `bannergif.py`
+(MIT, by Pk11).
 
 ## Credits
 

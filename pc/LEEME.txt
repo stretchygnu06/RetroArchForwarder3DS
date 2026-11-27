@@ -7,7 +7,7 @@ configuracion, tus overrides y tus partidas de siempre.
 
 ABRIRLO
 - Doble clic en "RetroArch Forwarder PC.bat".
-- Junto a el deben estar fwdgen-pc.exe y template.cia.
+- Junto a el deben estar fwdgen-pc.exe, template.cia y FwdArt.cs.
 
 ANTES DE EMPEZAR
 - Conecta la SD de la 3DS a la PC (o la 3DS por FTP montada como unidad).
@@ -88,3 +88,52 @@ API KEY
   encuentra en una carpeta vecina.
 
 Si algo falla, el detalle queda en log.txt.
+
+
+DS FORWARDER PC (juegos de Nintendo DS)
+=======================================
+
+Una ventana aparte, en esta misma carpeta, para crear forwarders de DS
+(nds-bootstrap, los de YANBF) con el banner de esta herramienta: logo y
+fondo de SteamGridDB, banner transparente o portada de libretro. El icono
+es el original del juego, sacado de la ROM igual que lo hace YANBF.
+
+ABRIRLO
+- Doble clic en "DS Forwarder PC.bat".
+- Necesita la carpeta "generator" de YANBF (YANBF-Windows\generator): de
+  ahi usa makerom.exe, data\forwarder.elf, data\build-cia.rsf y
+  data\dsboot.wav. Se busca sola en las carpetas vecinas; si no, elige la
+  carpeta con "Carpeta...".
+
+USO
+1. Elige la SD y "Elegir juego...": un .nds de la SD.
+2. El nombre se llena con el titulo de la ROM; el publisher, con
+   "Nintendo DS". Puedes cambiar los dos.
+3. Elige logo y fondo en SteamGridDB, o archivos locales, igual que en
+   RetroArch Forwarder PC.
+4. "Sonido": por defecto el de arranque del DS (dsboot.wav de YANBF).
+   "Elegir..." usa otro WAV, "DS" vuelve al de arranque, "Sin" lo quita.
+5. "Crear CIA". Se guarda en <SD>\cias\. Instalalo con FBI.
+
+IDS: SE INSTALA ENCIMA DE TU FORWARDER DE YANBF
+- Cada juego conserva el ID que tenia en YANBF (ids_anteriores.txt de la
+  carpeta de YANBF), asi el CIA nuevo reemplaza al viejo sin desinstalar.
+- Un juego nuevo toma el siguiente ID libre despues de todos los usados
+  (y de id.txt), saltando los que ya estan instalados en la SD, y se anota
+  en ids_anteriores.txt e id.txt: los .bat de YANBF siguen funcionando.
+- La version empieza en 2.0.0 y sube en cada CIA (versions-ds.txt), asi
+  el menu HOME refresca el icono y el banner.
+
+IMAGENES LOCALES (tienen prioridad sobre SteamGridDB)
+- logos\<nombre>.png y covers\<nombre>.png, como en RetroArch Forwarder PC.
+- Las imagenes de la carpeta banners\ de YANBF tambien se usan: si tienen
+  partes transparentes, como logo; si no, como fondo.
+
+VARIOS JUEGOS
+- "Varios juegos..." lista los .nds de una carpeta de la SD, todos
+  marcados (tambien los que ya tienen forwarder, para rehacerlos).
+- Cada juego usa sus imagenes locales y lo que falte de SteamGridDB; el
+  fondo, si no hay, de libretro.
+
+El detalle de errores queda en log-ds.txt. La configuracion, en
+settings-ds.json (la API key se toma de settings.json la primera vez).
