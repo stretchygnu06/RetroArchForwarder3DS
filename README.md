@@ -98,6 +98,14 @@ Then, with the console's SD card in the PC:
      *Heroes* (backgrounds), *Grids* (covers) and *Icons* appear as thumbnails;
      click one to use it. The first of each can be picked automatically;
    - the libretro title screen, as the background, when nothing else is set.
+   - **libretro covers**: *Icono: portada de libretro* makes the icon from the
+     game's `Named_Boxarts`, whole, over a blurred copy of itself (a file in
+     `icons\` still wins); *Banner: portada de libretro* does the same for the
+     banner, instead of logo and background, or alone on a transparent banner.
+     libretro images come from the
+     [libretro-thumbnails](https://github.com/libretro-thumbnails) repositories
+     on GitHub, following their renamed-game symlinks, with
+     thumbnails.libretro.com as the fallback.
 4. **Banner**: the logo over the background, blurred and dimmed, or the
    background alone. The **transparent banner** option keeps only the logo, so the
    HOME menu shows through. The icon always has a background: icons carry

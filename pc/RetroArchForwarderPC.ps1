@@ -252,6 +252,27 @@ public static class FwdArt
         return b;
     }
 
+    // A picture whole (aspect kept) inside w x h, over a blurred, dimmed copy
+    // of itself filling the frame, or over transparency.
+    public static Bitmap FitOver(Image img, int w, int h, int margin, bool transparent)
+    {
+        Bitmap b;
+        if (transparent)
+        {
+            b = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(b)) g.Clear(Color.Transparent);
+        }
+        else
+        {
+            b = Cover(img, w, h);
+            BlurDarken(b, Math.Max(1, w / 64), 0.55);
+        }
+        double s = Math.Min((double)(w - 2 * margin) / img.Width, (double)(h - 2 * margin) / img.Height);
+        int dw = Math.Max(1, (int)Math.Round(img.Width * s)), dh = Math.Max(1, (int)Math.Round(img.Height * s));
+        using (Graphics g = Hq(b)) g.DrawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        return b;
+    }
+
     // Only the logo, on a fully transparent banner: the HOME menu shows
     // through around it.
     public static Bitmap LogoOnly(Image logo, int w, int h, int boxW, int boxH)
@@ -281,7 +302,7 @@ public static class FwdArt
 }
 
 # ---------------------------------------------------------------- settings
-$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Transparent = $false; Sounds = @{}; LastRomDir = ''; LastBatchDir = '' }
+$script:Cfg = @{ ApiKey = ''; AutoPick = $true; Sd = ''; Transparent = $false; CoverIcon = $false; CoverBanner = $false; Sounds = @{}; LastRomDir = ''; LastBatchDir = '' }
 if (Test-Path -LiteralPath $script:Settings) {
     try {
         $j = Get-Content -LiteralPath $script:Settings -Raw | ConvertFrom-Json
@@ -289,6 +310,8 @@ if (Test-Path -LiteralPath $script:Settings) {
         if ($null -ne $j.AutoPick) { $script:Cfg.AutoPick  = [bool]$j.AutoPick }
         if ($j.Sd)                 { $script:Cfg.Sd        = [string]$j.Sd }
         if ($null -ne $j.Transparent) { $script:Cfg.Transparent = [bool]$j.Transparent }
+        if ($null -ne $j.CoverIcon)   { $script:Cfg.CoverIcon   = [bool]$j.CoverIcon }
+        if ($null -ne $j.CoverBanner) { $script:Cfg.CoverBanner = [bool]$j.CoverBanner }
         if ($null -ne $j.Sounds) {
             foreach ($pr in $j.Sounds.PSObject.Properties) { $script:Cfg.Sounds[$pr.Name] = [string]$pr.Value }
         }
@@ -339,6 +362,7 @@ $script:GameName = $null
 $script:Logo = $null; $script:Bg = $null; $script:IconImg = $null
 $script:LogoIsLocal = $false; $script:BgIsLocal = $false; $script:IconIsLocal = $false
 $script:Tid = $null
+$script:Cover = $null; $script:CoverTried = $false   # libretro Named_Boxarts of the game
 
 # ---------------------------------------------------------------- helpers
 function Q([string]$s) { '"' + $s + '"' }
@@ -482,7 +506,45 @@ function Get-ThumbSystem([string]$romPath, [string]$corePath) {
     return (Get-System $corePath)
 }
 
-# Downloads Named_Titles / Named_Boxarts from libretro (plain HTTP, like the console app).
+# Downloads one libretro thumbnail to $dest. The images live in GitHub
+# repositories, one per system (libretro-thumbnails/Sony_-_PlayStation...);
+# thumbnails.libretro.com serves the same files but has been down at times,
+# so it is only the fallback. Renamed games are git symlinks: the file then
+# holds the name of the real image, followed up to three times.
+function Save-LibretroThumb([string]$system, [string]$kind, [string]$file, [string]$dest) {
+    $repo = 'https://raw.githubusercontent.com/libretro-thumbnails/' + ($system -replace ' ', '_') + '/master/'
+    $bases = @(
+        @{ Url = { param($k, $f) $repo + $k + '/' + [Uri]::EscapeDataString($f) }; Links = $true },
+        @{ Url = { param($k, $f) "$($script:Thumbs)/$([Uri]::EscapeDataString($system))/$k/$([Uri]::EscapeDataString($f))" }; Links = $false }
+    )
+    foreach ($b in $bases) {
+        $k = $kind; $f = $file
+        for ($hop = 0; $hop -le 3; $hop++) {
+            try {
+                Invoke-WebRequest -Uri (& $b.Url $k $f) -OutFile $dest -UseBasicParsing -TimeoutSec 20
+            } catch { break }
+            $bytes = [IO.File]::ReadAllBytes($dest)
+            if ($bytes.Length -gt 8 -and $bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) { return $true }
+            # A symlink: a short text naming the target, relative to the folder.
+            if (-not $b.Links -or $bytes.Length -gt 400) { break }
+            $target = [Text.Encoding]::UTF8.GetString($bytes).Trim()
+            if ($target -notmatch '\.png$' -or $target -match '^[a-z]+:' -or $target.StartsWith('/')) { break }
+            $parts = @($k) + @($target -split '/')
+            $stack = New-Object System.Collections.ArrayList
+            $bad = $false
+            foreach ($p in ($parts[0..($parts.Count - 2)])) {
+                if ($p -eq '..') { if ($stack.Count) { $stack.RemoveAt($stack.Count - 1) } else { $bad = $true } }
+                elseif ($p -and $p -ne '.') { [void]$stack.Add($p) }
+            }
+            if ($bad -or $stack.Count -ne 1) { break }    # must stay inside a Named_* folder of the repo
+            $k = $stack[0]; $f = $parts[-1]
+        }
+    }
+    Remove-Item -LiteralPath $dest -ErrorAction SilentlyContinue
+    return $false
+}
+
+# Named_Titles / Named_Boxarts of a game, cached.
 function Get-LibretroArt([string]$kind, [string]$gameName = $script:GameName, [string]$romPath = $script:Rom, [string]$corePath = $cmbCore.Text) {
     $system = Get-ThumbSystem $romPath $corePath
     if (-not $system -or -not $gameName) { return $null }
@@ -492,12 +554,7 @@ function Get-LibretroArt([string]$kind, [string]$gameName = $script:GameName, [s
         $file = ($n -replace '[&*/:`"<>?\\|]', '_') + '.png'
         $dest = Join-Path $script:CacheDir ("libretro_{0}_{1}_{2}" -f ($system -replace '[^A-Za-z0-9]', ''), $kind, $file)
         if (Test-Path -LiteralPath $dest) { return $dest }
-        $url = "$($script:Thumbs)/$([Uri]::EscapeDataString($system))/$kind/$([Uri]::EscapeDataString($file))"
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -TimeoutSec 20
-            if ((Get-Item -LiteralPath $dest).Length -gt 100) { return $dest }
-            Remove-Item -LiteralPath $dest -ErrorAction SilentlyContinue
-        } catch { Remove-Item -LiteralPath $dest -ErrorAction SilentlyContinue }
+        if (Save-LibretroThumb $system $kind $file $dest) { return $dest }
     }
     return $null
 }
@@ -522,7 +579,7 @@ function Save-Remote([string]$url, [string]$kind, $id) {
 # ---------------------------------------------------------------- GUI
 $form = New-Object System.Windows.Forms.Form
 $form.Text = $script:AppName
-$form.ClientSize = New-Object System.Drawing.Size(900, 640)
+$form.ClientSize = New-Object System.Drawing.Size(900, 666)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -571,59 +628,67 @@ $chkTrans.Checked = $script:Cfg.Transparent
 $tipTrans = New-Object System.Windows.Forms.ToolTip
 $tipTrans.SetToolTip($chkTrans, 'Solo el logo en el banner, sin fondo: se ve el fondo del menu HOME. El icono siempre lleva fondo (la 3DS no admite iconos transparentes).')
 
+$chkCoverIcon = Add-Ctl (New-Object System.Windows.Forms.CheckBox) 12 216 190 23
+$chkCoverIcon.Text = 'Icono: portada de libretro'
+$chkCoverBanner = Add-Ctl (New-Object System.Windows.Forms.CheckBox) 206 216 194 23
+$chkCoverBanner.Text = 'Banner: portada de libretro'
+$tipCover = New-Object System.Windows.Forms.ToolTip
+$tipCover.SetToolTip($chkCoverIcon, 'Usa la portada (Named_Boxarts) de libretro como icono, ajustada al cuadrado sobre ella misma difuminada. Un icono de la carpeta icons\ tiene prioridad.')
+$tipCover.SetToolTip($chkCoverBanner, 'Usa la portada de libretro como banner en lugar del logo y el fondo. Con "Banner transparente" queda la portada sola.')
+
 # --- left column: SD, game, core
-[void](New-Label 'SD:' 12 222 40)
-$cmbSd = Add-Ctl (New-Object System.Windows.Forms.ComboBox) 55 222 80 23
+[void](New-Label 'SD:' 12 248 40)
+$cmbSd = Add-Ctl (New-Object System.Windows.Forms.ComboBox) 55 248 80 23
 $cmbSd.DropDownStyle = 'DropDownList'
-$btnSdRefresh = New-Button 'Actualizar' 140 221 75 25
-$lblSd = New-Label '' 220 222 178
+$btnSdRefresh = New-Button 'Actualizar' 140 247 75 25
+$lblSd = New-Label '' 220 248 178
 $lblSd.AutoEllipsis = $true
 
-$btnRom = New-Button 'Elegir juego...' 12 254 120
-$btnBatch = New-Button 'Varios juegos...' 136 254 120
+$btnRom = New-Button 'Elegir juego...' 12 280 120
+$btnBatch = New-Button 'Varios juegos...' 136 280 120
 $tipBatch = New-Object System.Windows.Forms.ToolTip
 $tipBatch.SetToolTip($btnBatch, 'Crea los CIAs de todos los juegos de una carpeta de la SD, detectando los .m3u.')
-$lblRom = New-Label 'Ningun juego seleccionado' 262 256 136
+$lblRom = New-Label 'Ningun juego seleccionado' 262 282 136
 $lblRom.AutoEllipsis = $true
 
-[void](New-Label 'Core:' 12 288 90)
-$cmbCore = Add-Ctl (New-Object System.Windows.Forms.ComboBox) 105 288 290 23
+[void](New-Label 'Core:' 12 314 90)
+$cmbCore = Add-Ctl (New-Object System.Windows.Forms.ComboBox) 105 314 290 23
 $cmbCore.DropDownStyle = 'DropDownList'
 
-[void](New-Label 'Nombre:' 12 320 90)
-$txtName = New-TextBox 105 320 290 ''
+[void](New-Label 'Nombre:' 12 346 90)
+$txtName = New-TextBox 105 346 290 ''
 $txtName.MaxLength = 64
-[void](New-Label 'Publisher:' 12 350 90)
-$txtPub = New-TextBox 105 350 290 'RetroArch'
+[void](New-Label 'Publisher:' 12 376 90)
+$txtPub = New-TextBox 105 376 290 'RetroArch'
 $tipPub = New-Object System.Windows.Forms.ToolTip
 $tipPub.SetToolTip($txtPub, 'Se llena solo con la plataforma del juego (PlayStation, Game Boy...). Puedes cambiarlo antes de crear el CIA.')
 $txtPub.MaxLength = 64
 
-[void](New-Label 'Title ID:' 12 382 90)
-$lblTid = New-Label '-' 105 382 290
+[void](New-Label 'Title ID:' 12 408 90)
+$lblTid = New-Label '-' 105 408 290
 $lblTid.Font = New-Object System.Drawing.Font('Consolas', 9)
-$lblTidInfo = New-Label '' 12 404 383
+$lblTidInfo = New-Label '' 12 430 383
 $lblTidInfo.Height = 36; $lblTidInfo.TextAlign = 'TopLeft'
 
-[void](New-Label 'Sonido:' 12 446 55)
-$lblSound = New-Label '' 68 446 175
+[void](New-Label 'Sonido:' 12 472 55)
+$lblSound = New-Label '' 68 472 175
 $tipSoundLbl = New-Object System.Windows.Forms.ToolTip
 $lblSound.AutoEllipsis = $true
-$btnSound = New-Button 'Elegir...' 246 444 60 26
-$btnSoundPlay = New-Button 'Probar' 308 444 46 26
-$btnSoundClear = New-Button 'Quitar' 356 444 42 26
+$btnSound = New-Button 'Elegir...' 246 470 60 26
+$btnSoundPlay = New-Button 'Probar' 308 470 46 26
+$btnSoundClear = New-Button 'Quitar' 356 470 42 26
 $tipSound = New-Object System.Windows.Forms.ToolTip
 $tipSound.SetToolTip($btnSound, 'Sonido al seleccionar el icono en el menu HOME, para el sistema del juego elegido (WAV PCM, mono o estereo, maximo 3 segundos).')
 
-$btnBuild = New-Button 'Crear CIA' 12 476 383 70
+$btnBuild = New-Button 'Crear CIA' 12 502 383 70
 $btnBuild.Font = New-Object System.Drawing.Font('Segoe UI', 12, [System.Drawing.FontStyle]::Bold)
-$progress = Add-Ctl (New-Object System.Windows.Forms.ProgressBar) 12 560 383 18
+$progress = Add-Ctl (New-Object System.Windows.Forms.ProgressBar) 12 586 383 18
 $progress.Maximum = 4
-$lblStatus = New-Label 'Listo.' 12 580 383
+$lblStatus = New-Label 'Listo.' 12 606 383
 $lblStatus.Height = 46; $lblStatus.TextAlign = 'TopLeft'
 
 # --- right column: SteamGridDB
-$grp = Add-Ctl (New-Object System.Windows.Forms.GroupBox) 410 6 478 626
+$grp = Add-Ctl (New-Object System.Windows.Forms.GroupBox) 410 6 478 652
 $grp.Text = 'SteamGridDB'
 function Add-G($ctl, [int]$x, [int]$y, [int]$w, [int]$h) {
     $ctl.Location = New-Object System.Drawing.Point($x, $y)
@@ -651,7 +716,7 @@ $chkAuto = Add-G (New-Object System.Windows.Forms.CheckBox) 10 132 458 22
 $chkAuto.Text = 'Elegir automaticamente el primer logo, fondo e icono al elegir juego'
 $chkAuto.Checked = $script:Cfg.AutoPick
 
-$tabs = Add-G (New-Object System.Windows.Forms.TabControl) 10 160 458 456
+$tabs = Add-G (New-Object System.Windows.Forms.TabControl) 10 160 458 482
 function New-Tab([string]$title) {
     $tp = New-Object System.Windows.Forms.TabPage
     $tp.Text = $title
@@ -793,32 +858,45 @@ function Update-Tid {
     }
 }
 
-function New-ArtFor([string]$bgPath, [string]$logoPath, [string]$iconPath, [bool]$transparent, [string]$outBanner, [string]$outIcon) {
+function New-ArtFor([string]$bgPath, [string]$logoPath, [string]$iconPath, [bool]$transparent, [string]$outBanner, [string]$outIcon,
+                    [string]$coverPath = $null, [bool]$coverIcon = $false, [bool]$coverBanner = $false, [bool]$iconIsLocal = $false) {
     Remove-Item -LiteralPath $outBanner, $outIcon -ErrorAction SilentlyContinue
     $bg = Load-Image $bgPath; $logo = Load-Image $logoPath; $icon = Load-Image $iconPath
+    $cover = $(if ($coverPath -and ($coverIcon -or $coverBanner)) { Load-Image $coverPath } else { $null })
     try {
-        if ($logo -and $transparent) {
+        if ($cover -and $coverBanner) {
+            # The cover, whole, over itself blurred; or alone when transparent.
+            $b = [FwdArt]::FitOver($cover, 256, 128, 4, $transparent)
+            if ($transparent) { [FwdArt]::SaveAlpha($b, $outBanner) } else { [FwdArt]::SaveOpaque($b, $outBanner) }
+            $b.Dispose()
+        } elseif ($logo -and $transparent) {
             $b = [FwdArt]::LogoOnly($logo, 256, 128, 248, 120)
             [FwdArt]::SaveAlpha($b, $outBanner); $b.Dispose()
         } elseif ($bg -or $logo) {
             $b = [FwdArt]::Compose($bg, $logo, 256, 128, 232, 100, 3)
             [FwdArt]::SaveOpaque($b, $outBanner); $b.Dispose()
         }
-        if ($icon) {
+        # Icon: a file of icons\ first, then the libretro cover, then the
+        # SteamGridDB icon, then the logo over the background.
+        if ($icon -and $iconIsLocal) {
             $i = [FwdArt]::ComposeIcon($bg, $icon)
-            [FwdArt]::SaveOpaque($i, $outIcon); $i.Dispose()
+        } elseif ($cover -and $coverIcon) {
+            $i = [FwdArt]::FitOver($cover, 48, 48, 0, $false)
+        } elseif ($icon) {
+            $i = [FwdArt]::ComposeIcon($bg, $icon)
         } elseif ($bg -or $logo) {
             $i = [FwdArt]::Compose($bg, $logo, 48, 48, 44, 44, 1)
-            [FwdArt]::SaveOpaque($i, $outIcon); $i.Dispose()
-        }
+        } else { $i = $null }
+        if ($i) { [FwdArt]::SaveOpaque($i, $outIcon); $i.Dispose() }
     } finally {
-        foreach ($x in @($bg, $logo, $icon)) { if ($x) { $x.Dispose() } }
+        foreach ($x in @($bg, $logo, $icon, $cover)) { if ($x) { $x.Dispose() } }
     }
 }
 
 # Builds the banner and the icon exactly as they will be written.
 function New-Art([string]$outBanner, [string]$outIcon) {
-    New-ArtFor $script:Bg $script:Logo $script:IconImg $chkTrans.Checked $outBanner $outIcon
+    $localIcon = [bool]($script:IconImg -and $script:IconImg.StartsWith((Join-Path $script:Root 'icons'), [StringComparison]::OrdinalIgnoreCase))
+    New-ArtFor $script:Bg $script:Logo $script:IconImg $chkTrans.Checked $outBanner $outIcon $script:Cover $chkCoverIcon.Checked $chkCoverBanner.Checked $localIcon
 }
 
 function Use-Transparent { return [bool]($chkTrans.Checked -and $script:Logo) }
@@ -834,7 +912,10 @@ function Update-Preview {
     $t = @()
     $t += 'Logo: '  + $(if ($script:Logo)    { [IO.Path]::GetFileName($script:Logo) }    else { '(ninguno)' })
     $t += 'Fondo: ' + $(if ($script:Bg)      { [IO.Path]::GetFileName($script:Bg) }      else { '(ninguno)' })
-    $t += 'Icono: ' + $(if ($script:IconImg) { [IO.Path]::GetFileName($script:IconImg) } else { '(del logo)' })
+    $localIcon = [bool]($script:IconImg -and $script:IconImg.StartsWith((Join-Path $script:Root 'icons'), [StringComparison]::OrdinalIgnoreCase))
+    $t += 'Icono: ' + $(if ($localIcon) { [IO.Path]::GetFileName($script:IconImg) } elseif ($chkCoverIcon.Checked -and $script:Cover) { 'portada de libretro' } elseif ($script:IconImg) { [IO.Path]::GetFileName($script:IconImg) } else { '(del logo)' })
+    if ($chkCoverBanner.Checked -and $script:Cover) { $t[0] = 'Banner: portada de libretro' }
+    if (($chkCoverIcon.Checked -or $chkCoverBanner.Checked) -and $script:Rom -and -not $script:Cover) { $t += 'Portada de libretro: no encontrada' }
     if (-not $picBanner.Image) { $t += 'Sin imagenes: se usa la de la plantilla.' }
     $lblArt.Text = $t -join "`n"
 }
@@ -937,6 +1018,19 @@ $btnSearch.Add_Click({ Search-Games $txtSearch.Text.Trim() })
 $txtSearch.Add_KeyDown({ param($s, $e) if ($e.KeyCode -eq 'Enter') { $e.SuppressKeyPress = $true; Search-Games $txtSearch.Text.Trim() } })
 $chkAuto.Add_CheckedChanged({ $script:Cfg.AutoPick = $chkAuto.Checked; Save-Settings })
 $chkTrans.Add_CheckedChanged({ $script:Cfg.Transparent = $chkTrans.Checked; Save-Settings; Update-Preview })
+$chkCoverIcon.Checked = $script:Cfg.CoverIcon
+$chkCoverBanner.Checked = $script:Cfg.CoverBanner
+$onCover = {
+    $script:Cfg.CoverIcon = $chkCoverIcon.Checked; $script:Cfg.CoverBanner = $chkCoverBanner.Checked; Save-Settings
+    if (($chkCoverIcon.Checked -or $chkCoverBanner.Checked) -and $script:Rom -and -not $script:CoverTried) {
+        Set-Status 'Buscando portada en libretro...'
+        $script:Cover = Get-LibretroArt 'Named_Boxarts'; $script:CoverTried = $true
+        Set-Status 'Listo.'
+    }
+    Update-Preview
+}
+$chkCoverIcon.Add_CheckedChanged($onCover)
+$chkCoverBanner.Add_CheckedChanged($onCover)
 $btnSdRefresh.Add_Click({ Refresh-Sd })
 $cmbCore.Add_SelectedIndexChanged({ Update-Sound; $txtPub.Text = Get-PlatformName (Get-CurrentSystem) })
 $btnSound.Add_Click({
@@ -1018,6 +1112,11 @@ function Load-Game([string]$file) {
         Set-Status 'Buscando pantalla de titulo en libretro...'
         $script:Bg = Get-LibretroArt 'Named_Titles'
     }
+    $script:Cover = $null; $script:CoverTried = $false
+    if ($chkCoverIcon.Checked -or $chkCoverBanner.Checked) {
+        Set-Status 'Buscando portada en libretro...'
+        $script:Cover = Get-LibretroArt 'Named_Boxarts'; $script:CoverTried = $true
+    }
     Update-Preview
     Update-Tid
     Set-Status 'Listo.'
@@ -1045,14 +1144,16 @@ $btnRom.Add_Click({
 # ---------------------------------------------------------------- build
 # Builds one CIA: picks the title id, renders the art, runs fwdgen-pc.
 # Returns @{ Tid; Version; Status } or throws.
-function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem, [string]$romFile = $script:Rom, [string]$publisher = $txtPub.Text) {
+function Invoke-Build([string]$sdRom, [string]$name, [string]$bg, [string]$logo, [string]$icon, [bool]$transparent, [string]$out, [string]$core = [string]$cmbCore.SelectedItem, [string]$romFile = $script:Rom, [string]$publisher = $txtPub.Text,
+                      [string]$cover = $script:Cover, [bool]$coverIcon = $chkCoverIcon.Checked, [bool]$coverBanner = $chkCoverBanner.Checked) {
     $sd = Get-SdRoot
     $t = Invoke-Cli ("tid --sd {0} --rom {1}" -f (Q $sd), (Q $sdRom))
     if ($t.ERROR -or -not $t.TID) { throw "Title ID: $(if ($t.ERROR) { $t.ERROR } else { 'sin respuesta' })" }
 
     $b = Join-Path $env:TEMP 'rafpc_build_banner.png'
     $i = Join-Path $env:TEMP 'rafpc_build_icon.png'
-    New-ArtFor $bg $logo $icon $transparent $b $i
+    $localIcon = [bool]($icon -and $icon.StartsWith((Join-Path $script:Root 'icons'), [StringComparison]::OrdinalIgnoreCase))
+    New-ArtFor $bg $logo $icon $transparent $b $i $cover $coverIcon $coverBanner $localIcon
 
     $name = ($name -replace '"', '').Trim()
     $cliArgs = "build --sd {0} --template {1} --rom {2} --core {3} --name {4} --publisher {5} --tid {6} --out {7}" -f `
@@ -1258,7 +1359,7 @@ function Show-Batch {
     $chkSg.Checked = [bool]$txtKey.Text.Trim(); $chkSg.Enabled = [bool]$txtKey.Text.Trim()
     $lblOpts = BAdd (New-Object System.Windows.Forms.Label) 380 64 370 22
     $lblOpts.TextAlign = 'MiddleLeft'; $lblOpts.ForeColor = [System.Drawing.Color]::DimGray
-    $lblOpts.Text = "Banner transparente: $(if ($chkTrans.Checked) { 'si' } else { 'no' })   Sonido: el de cada sistema"
+    $lblOpts.Text = "Transparente: $(if ($chkTrans.Checked) { 'si' } else { 'no' })  Portada: $(if ($chkCoverIcon.Checked -and $chkCoverBanner.Checked) { 'icono y banner' } elseif ($chkCoverIcon.Checked) { 'icono' } elseif ($chkCoverBanner.Checked) { 'banner' } else { 'no' })  Sonido: por sistema"
 
     $lv = BAdd (New-Object System.Windows.Forms.ListView) 12 92 736 370
     $lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $true
@@ -1366,6 +1467,11 @@ function Show-Batch {
                 $names = @($stem, $clean)
                 $logo = Find-Local 'logos' $names; $bg = Find-Local 'covers' $names; $icon = Find-Local 'icons' $names
                 $src = @()
+                $cover = $null
+                if ($chkCoverIcon.Checked -or $chkCoverBanner.Checked) {
+                    $cover = Get-LibretroArt 'Named_Boxarts' $stem $g.File $g.Core
+                    $src += $(if ($cover) { 'portada libretro' } else { 'sin portada libretro' })
+                }
                 if ($chkSg.Checked -and (-not $logo -or -not $bg -or -not $icon)) {
                     $it.SubItems[3].Text = 'SteamGridDB...'; [System.Windows.Forms.Application]::DoEvents()
                     try {
@@ -1383,7 +1489,7 @@ function Show-Batch {
 
                 $it.SubItems[3].Text = 'Creando CIA...'; [System.Windows.Forms.Application]::DoEvents()
                 $out = Join-Path $ciaDir (($clean -replace '[\\/:*?"<>|]', '') + '.cia')
-                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core $g.File (Get-PlatformName (Get-ThumbSystem $g.File $g.Core))
+                $r = Invoke-Build $sdRom $clean $bg $logo $icon ([bool]$chkTrans.Checked) $out $g.Core $g.File (Get-PlatformName (Get-ThumbSystem $g.File $g.Core)) $cover
                 $it.SubItems[3].Text = "Listo, $($r.Tid.Substring(8))" + $(if ($r.Status -eq 'moved') { ' (ID movido)' } elseif ($r.Status -eq 'update') { ' (actualizado)' } else { '' })
                 $it.ForeColor = [System.Drawing.Color]::DarkGreen
                 $it.Checked = $false

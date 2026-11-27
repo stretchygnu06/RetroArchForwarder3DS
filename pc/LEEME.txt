@@ -34,6 +34,15 @@ USO
 4. "Crear CIA". Por defecto se guarda en <SD>\cias\.
 5. En la 3DS: FBI > SD > cias > instala el CIA.
 
+PORTADAS DE LIBRETRO
+- "Icono: portada de libretro": el icono es la portada del juego
+  (Named_Boxarts de libretro), entera, sobre ella misma difuminada.
+  Un icono tuyo en icons\ sigue teniendo prioridad.
+- "Banner: portada de libretro": el banner es la portada en lugar del
+  logo y el fondo. Con "Banner transparente" queda la portada sola.
+- Las imagenes de libretro se bajan de sus repositorios de GitHub
+  (thumbnails.libretro.com queda de respaldo). No necesitan cuenta.
+
 VARIOS JUEGOS A LA VEZ
 - "Varios juegos..." abre una lista con todos los juegos de una carpeta de
   la SD (y sus subcarpetas, si marcas la casilla).
